@@ -1,242 +1,333 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 
 type MarkPaidResponse =
-  | { paid: true; code: string; paid_links_30d: number }
-  | { paid: false }
+  | { paid: true; code: string; paid_links_30d?: number }
+  | { pro: true; user_id: string; status?: string }
   | { error: string }
 
 export default function SuccessPage() {
-  const [status, setStatus] = useState<'idle' | 'verifying' | 'paid' | 'unpaid' | 'error'>('idle')
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [code, setCode] = useState<string | null>(null)
-  const [paidLinks30d, setPaidLinks30d] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [sessionId, setSessionId] = useState<string>('')
 
-  // Read session_id from query string (client-side)
+  // Read session_id from URL without Next's searchParams typing issues
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const sid = params.get('session_id')
-    setSessionId(sid)
+    try {
+      const sp = new URLSearchParams(window.location.search)
+      const sid = (sp.get('session_id') ?? '').trim()
+      setSessionId(sid)
+    } catch {
+      setSessionId('')
+    }
   }, [])
 
-  const downloadUrl = useMemo(() => {
-    if (!code) return null
-    return `/dl/${code}`
-  }, [code])
+  return <SuccessInner sessionId={sessionId} />
+}
 
-  useEffect(() => {
-    if (!sessionId) return
+function SuccessInner({ sessionId }: { sessionId: string }) {
+  const [busy, setBusy] = useState(false)
+  const [res, setRes] = useState<MarkPaidResponse | null>(null)
 
-    const run = async () => {
-      setStatus('verifying')
-      setError(null)
+  const isProResult = !!(res && 'pro' in res && res.pro === true)
+  const isPaidLinkResult = !!(res && 'paid' in res && res.paid === true)
 
-      try {
-        const res = await fetch('/api/mark-paid', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: sessionId }),
-        })
-
-        if (!res.ok) {
-          const txt = await res.text()
-          throw new Error(txt || 'Failed to verify payment')
-        }
-
-        const data = (await res.json()) as MarkPaidResponse
-
-        if ('error' in data) throw new Error(data.error)
-
-        if (data.paid === true) {
-          setCode(data.code)
-          setPaidLinks30d(typeof data.paid_links_30d === 'number' ? data.paid_links_30d : null)
-          setStatus('paid')
-        } else {
-          setStatus('unpaid')
-        }
-      } catch (e: any) {
-        console.error(e)
-        setError(e?.message ?? 'Failed to verify payment')
-        setStatus('error')
-      }
+  const finalize = useCallback(async () => {
+    if (!sessionId) {
+      setRes({ error: 'Missing session_id in URL.' })
+      return
     }
 
-    run()
+    setBusy(true)
+    setRes(null)
+
+    try {
+      const r = await fetch('/api/mark-paid', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId }),
+      })
+
+      const json = (await r.json().catch(() => ({}))) as any
+      if (!r.ok) throw new Error(json?.error || 'Finalize failed')
+
+      // Paid link result
+      if (json?.paid === true && typeof json?.code === 'string') {
+        setRes({ paid: true, code: json.code, paid_links_30d: json.paid_links_30d })
+        return
+      }
+
+      // Pro subscription result
+      if (json?.pro === true && typeof json?.user_id === 'string') {
+        setRes({ pro: true, user_id: json.user_id, status: json.status ?? 'active' })
+        return
+      }
+
+      throw new Error('Finalization did not return a paid link or a Pro activation.')
+    } catch (e: any) {
+      setRes({ error: e?.message ?? 'Something went wrong' })
+    } finally {
+      setBusy(false)
+    }
   }, [sessionId])
 
+  useEffect(() => {
+    if (sessionId) finalize()
+  }, [sessionId, finalize])
+
+  const title = useMemo(() => {
+    if (isPaidLinkResult) return 'Payment successful ✅'
+    if (isProResult) return 'Pro activated ✅'
+    return 'Payment successful ✅'
+  }, [isPaidLinkResult, isProResult])
+
+  const subtitle = useMemo(() => {
+    if (busy) return 'Finalizing your purchase…'
+    if (isPaidLinkResult) return 'Your link is ready.'
+    if (isProResult) return 'Your subscription is active.'
+    return 'Finalizing…'
+  }, [busy, isPaidLinkResult, isProResult])
+
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        display: 'grid',
-        placeItems: 'center',
-        padding: 24,
-        fontFamily: 'system-ui',
-        background: 'linear-gradient(180deg, #0b1220 0%, #070a12 100%)',
-        color: 'white',
-      }}
-    >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 820,
-          background: 'rgba(255,255,255,0.06)',
-          border: '1px solid rgba(255,255,255,0.12)',
-          borderRadius: 18,
-          padding: 20,
-          boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-          <h1 style={{ fontSize: 26, margin: 0 }}>Payment successful ✅</h1>
-          <span style={{ opacity: 0.7 }}>finalizing your link…</span>
-        </div>
+    <main style={styles.page}>
+      <div style={styles.container}>
+        <div style={styles.card}>
+          <div style={styles.header}>
+            <div style={styles.dot} />
+            <div>
+              <h1 style={styles.h1}>{title}</h1>
+              <p style={styles.p}>{subtitle}</p>
+            </div>
+          </div>
 
-        <div style={{ marginTop: 10, opacity: 0.82, fontSize: 13 }}>
-          Session ID:{' '}
-          <code style={{ opacity: 0.9 }}>{sessionId ?? '(missing session_id)'}</code>
-        </div>
-
-        <div style={{ marginTop: 16 }}>
-          {status === 'idle' && <div style={{ opacity: 0.85 }}>Loading…</div>}
-
-          {status === 'verifying' && (
-            <div style={{ opacity: 0.85 }}>Confirming payment with Stripe…</div>
-          )}
-
-          {status === 'unpaid' && (
-            <div
-              style={{
-                padding: 14,
-                borderRadius: 14,
-                border: '1px solid rgba(255,255,255,0.12)',
-                background: 'rgba(255, 183, 0, 0.12)',
-              }}
-            >
-              <b>Payment not confirmed</b>
-              <div style={{ marginTop: 6, opacity: 0.9 }}>
-                If you just paid, wait a few seconds and refresh this page.
+          <div style={styles.body}>
+            <div style={styles.kv}>
+              <div style={styles.k}>Session ID</div>
+              <div style={styles.v}>
+                <code style={styles.code}>{sessionId || '(missing)'}</code>
               </div>
             </div>
-          )}
 
-          {status === 'error' && (
-            <div
-              style={{
-                padding: 14,
-                borderRadius: 14,
-                border: '1px solid rgba(255,72,72,0.25)',
-                background: 'rgba(255,72,72,0.14)',
-              }}
-            >
-              <b>Something went wrong</b>
-              <div style={{ marginTop: 6, opacity: 0.9 }}>
-                {error ?? 'Unknown error.'}
+            {busy && (
+              <div style={styles.notice}>
+                <span style={styles.noticeDot} />
+                <div>
+                  <div style={styles.noticeTitle}>Working…</div>
+                  <div style={styles.noticeText}>Please wait a moment.</div>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {status === 'paid' && (
-            <div
-              style={{
-                padding: 14,
-                borderRadius: 14,
-                border: '1px solid rgba(0, 214, 143, 0.25)',
-                background: 'rgba(0, 214, 143, 0.12)',
-              }}
-            >
-              <div style={{ fontWeight: 900, fontSize: 18 }}>Your link is ready 🎉</div>
-
-              <div style={{ marginTop: 8, opacity: 0.92 }}>
-                Code: <code>{code}</code>
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 6 }}>
-                  Share or download:
+            {!busy && isPaidLinkResult && (
+              <div style={{ display: 'grid', gap: 12 }}>
+                <div style={styles.successBox}>
+                  <div style={styles.successTitle}>Your download is unlocked.</div>
+                  <div style={styles.successText}>
+                    Code: <b>{(res as any).code}</b>
+                  </div>
                 </div>
 
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: 10,
-                    flexWrap: 'wrap',
-                    alignItems: 'center',
-                  }}
-                >
-                  <a
-                    href={downloadUrl ?? '#'}
-                    style={{
-                      padding: '12px 14px',
-                      borderRadius: 14,
-                      border: '1px solid rgba(255,255,255,0.18)',
-                      background: 'rgba(72, 118, 255, 0.35)',
-                      color: 'white',
-                      textDecoration: 'none',
-                      fontWeight: 900,
-                    }}
-                  >
+                <div style={styles.row}>
+                  <a style={styles.primaryBtn} href={`/dl/${(res as any).code}`}>
                     Go to download page
                   </a>
-
-                  <span style={{ opacity: 0.78, fontSize: 12 }}>
-                    Link: <code>{downloadUrl}</code>
-                  </span>
+                  <a style={styles.secondaryBtn} href="/">
+                    Back to home
+                  </a>
                 </div>
               </div>
+            )}
 
-              {/* Soft upgrade banner */}
-              {typeof paidLinks30d === 'number' && paidLinks30d >= 3 && (
-                <div
-                  style={{
-                    marginTop: 14,
-                    padding: 14,
-                    borderRadius: 14,
-                    border: '1px solid rgba(255,255,255,0.14)',
-                    background: 'rgba(255,255,255,0.08)',
-                  }}
-                >
-                  <div style={{ fontWeight: 900, marginBottom: 6 }}>💼 You use FilePay often</div>
-                  <div style={{ opacity: 0.92 }}>
-                    You’ve created <b>{paidLinks30d}</b> paid links in the last 30 days.
-                    <br />
-                    Save money with <b>Pro</b>: 50 links/month for $29.
-                  </div>
-
-                  <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <a
-                      href="/pricing"
-                      style={{
-                        padding: '10px 12px',
-                        borderRadius: 12,
-                        border: '1px solid rgba(255,255,255,0.18)',
-                        background: 'rgba(0, 214, 143, 0.35)',
-                        color: 'white',
-                        textDecoration: 'none',
-                        fontWeight: 900,
-                      }}
-                    >
-                      Upgrade to Pro
-                    </a>
-
-                    <span style={{ fontSize: 12, opacity: 0.7, alignSelf: 'center' }}>
-                      (no pressure — only if you share files often)
-                    </span>
+            {!busy && isProResult && (
+              <div style={{ display: 'grid', gap: 12 }}>
+                <div style={styles.successBoxAlt}>
+                  <div style={styles.successTitle}>Pro is active 🎉</div>
+                  <div style={styles.successText}>
+                    You can now create links without paying per link.
                   </div>
                 </div>
-              )}
-            </div>
-          )}
+
+                <div style={styles.row}>
+                  <a style={styles.primaryBtn} href="/">
+                    Back to home
+                  </a>
+                  <a style={styles.secondaryBtn} href="/pricing">
+                    View pricing
+                  </a>
+                </div>
+              </div>
+            )}
+
+            {!busy && res && 'error' in res && (
+              <div style={{ display: 'grid', gap: 12 }}>
+                <div style={styles.errorBox}>
+                  <div style={styles.errorTitle}>Something went wrong</div>
+                  <div style={styles.errorText}>We couldn’t finalize the purchase.</div>
+                  <div style={{ marginTop: 10 }}>
+                    <b>❌ {res.error}</b>
+                  </div>
+                </div>
+
+                <div style={styles.row}>
+                  <button style={styles.primaryBtn} onClick={finalize}>
+                    Retry finalize
+                  </button>
+                  <a style={styles.secondaryBtn} href="/">
+                    Back to home
+                  </a>
+                </div>
+
+                <div style={styles.tip}>
+                  If you already paid, wait a few seconds and retry. (In production we’ll use webhooks to avoid this.)
+                </div>
+              </div>
+            )}
+
+            {!busy && !res && !sessionId && (
+              <div style={styles.errorBox}>
+                <div style={styles.errorTitle}>Missing session_id</div>
+                <div style={styles.errorText}>
+                  Stripe should redirect here with <code style={styles.code}>?session_id=...</code>
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <a style={styles.secondaryBtn} href="/">
+                    Back to home
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div style={{ marginTop: 16, opacity: 0.88 }}>
-          <a href="/" style={{ textDecoration: 'underline', color: 'white' }}>
-            Back to home
-          </a>
-        </div>
+        <footer style={styles.footer}>Local MVP · Success supports paid links + Pro subscriptions</footer>
       </div>
     </main>
   )
+}
+
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    minHeight: '100vh',
+    padding: 24,
+    color: '#fff',
+    fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
+    background:
+      'radial-gradient(1200px 600px at 18% 0%, rgba(124,58,237,0.26), transparent 60%), radial-gradient(900px 500px at 90% 10%, rgba(59,130,246,0.22), transparent 55%), #07070a',
+  },
+  container: { maxWidth: 860, margin: '0 auto' },
+  card: {
+    borderRadius: 18,
+    border: '1px solid rgba(255,255,255,0.10)',
+    background: 'rgba(255,255,255,0.04)',
+    boxShadow: '0 18px 40px rgba(0,0,0,0.35)',
+    overflow: 'hidden',
+  },
+  header: {
+    padding: 16,
+    display: 'flex',
+    gap: 12,
+    alignItems: 'center',
+    borderBottom: '1px solid rgba(255,255,255,0.08)',
+  },
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 999,
+    background: 'linear-gradient(135deg, rgba(255,255,255,0.9), rgba(124,58,237,0.9))',
+    boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
+  },
+  h1: { margin: 0, fontSize: 26, fontWeight: 950, letterSpacing: -0.2 },
+  p: { margin: '6px 0 0', opacity: 0.8, lineHeight: 1.35 },
+  body: { padding: 16, display: 'grid', gap: 14 },
+
+  kv: { display: 'grid', gridTemplateColumns: '120px 1fr', gap: 10, alignItems: 'center' },
+  k: { opacity: 0.7, fontSize: 12, fontWeight: 800 },
+  v: { fontSize: 12 },
+
+  code: {
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+    fontSize: 12,
+    padding: '2px 6px',
+    borderRadius: 8,
+    background: 'rgba(255,255,255,0.08)',
+    border: '1px solid rgba(255,255,255,0.12)',
+  },
+
+  notice: {
+    display: 'flex',
+    gap: 10,
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 14,
+    border: '1px solid rgba(255,255,255,0.10)',
+    background: 'rgba(0,0,0,0.22)',
+  },
+  noticeDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    background: 'rgba(59,130,246,0.9)',
+    boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
+  },
+  noticeTitle: { fontWeight: 900 },
+  noticeText: { opacity: 0.8, fontSize: 13, marginTop: 2 },
+
+  successBox: {
+    padding: 14,
+    borderRadius: 14,
+    border: '1px solid rgba(16,185,129,0.25)',
+    background: 'rgba(16,185,129,0.10)',
+  },
+  successBoxAlt: {
+    padding: 14,
+    borderRadius: 14,
+    border: '1px solid rgba(59,130,246,0.25)',
+    background: 'rgba(59,130,246,0.10)',
+  },
+  successTitle: { fontWeight: 950, fontSize: 14 },
+  successText: { marginTop: 6, opacity: 0.85, fontSize: 13, lineHeight: 1.35 },
+
+  errorBox: {
+    padding: 14,
+    borderRadius: 14,
+    border: '1px solid rgba(244,63,94,0.28)',
+    background: 'rgba(244,63,94,0.10)',
+  },
+  errorTitle: { fontWeight: 950, fontSize: 14 },
+  errorText: { marginTop: 6, opacity: 0.9, fontSize: 13, lineHeight: 1.35 },
+
+  row: { display: 'flex', gap: 10, flexWrap: 'wrap' },
+
+  primaryBtn: {
+    padding: '12px 14px',
+    borderRadius: 14,
+    border: '1px solid rgba(255,255,255,0.16)',
+    background: 'linear-gradient(135deg, rgba(255,255,255,0.95), rgba(255,255,255,0.78))',
+    color: '#0b0b10',
+    fontWeight: 950,
+    cursor: 'pointer',
+    textDecoration: 'none',
+    boxShadow: '0 12px 28px rgba(0,0,0,0.35)',
+  },
+  secondaryBtn: {
+    padding: '12px 14px',
+    borderRadius: 14,
+    border: '1px solid rgba(255,255,255,0.14)',
+    background: 'rgba(255,255,255,0.06)',
+    color: 'white',
+    fontWeight: 850,
+    cursor: 'pointer',
+    textDecoration: 'none',
+  },
+
+  tip: {
+    opacity: 0.7,
+    fontSize: 12,
+    lineHeight: 1.35,
+    padding: 12,
+    borderRadius: 14,
+    border: '1px solid rgba(255,255,255,0.10)',
+    background: 'rgba(0,0,0,0.18)',
+  },
+
+  footer: { marginTop: 14, opacity: 0.6, fontSize: 12 },
 }
