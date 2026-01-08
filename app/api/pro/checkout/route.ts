@@ -2,9 +2,7 @@ import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: '2025-12-15.clover',
-})
+// Stripe init moved inside POST() for Vercel build safety
 
 // Server-side Supabase (Service Role)
 const supabaseAdmin = createClient(
@@ -29,7 +27,13 @@ function getOrigin(req: Request) {
  * using STRIPE_PRO_PRICE_ID (recurring price).
  */
 export async function POST(req: Request) {
-  try {
+  
+  // Stripe is initialized inside the handler (prevents build-time crashes)
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+    apiVersion: '2025-12-15.clover',
+  })
+
+try {
     const priceId = (process.env.STRIPE_PRO_PRICE_ID ?? '').trim()
     if (!priceId) {
       return NextResponse.json(

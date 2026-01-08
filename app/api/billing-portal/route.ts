@@ -12,16 +12,20 @@ function mustEnv(name: string) {
 }
 
 export async function POST(req: Request) {
-  try {
+  
+  // Stripe is initialized inside the handler (prevents build-time crashes)
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+    apiVersion: '2025-12-15.clover',
+  })
+
+try {
     // ✅ Read env vars at request-time (not build-time)
     const STRIPE_SECRET_KEY = mustEnv('STRIPE_SECRET_KEY')
     const SUPABASE_URL = mustEnv('SUPABASE_URL')
     const SUPABASE_SERVICE_ROLE_KEY = mustEnv('SUPABASE_SERVICE_ROLE_KEY')
     const NEXT_PUBLIC_SITE_URL = mustEnv('NEXT_PUBLIC_SITE_URL')
 
-    const stripe = new Stripe(STRIPE_SECRET_KEY, {
-      apiVersion: '2025-12-15.clover',
-    })
+// Stripe init moved inside POST() for Vercel build safety
 
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { persistSession: false },

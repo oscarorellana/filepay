@@ -2,9 +2,7 @@ import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: '2025-12-15.clover',
-})
+// Stripe init moved inside POST() for Vercel build safety
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL!,
@@ -13,7 +11,13 @@ const supabaseAdmin = createClient(
 )
 
 export async function POST(req: Request) {
-  try {
+  
+  // Stripe is initialized inside the handler (prevents build-time crashes)
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+    apiVersion: '2025-12-15.clover',
+  })
+
+try {
     const body = await req.json().catch(() => ({}))
     const sessionId = (body?.session_id as string | undefined)?.trim()
 
