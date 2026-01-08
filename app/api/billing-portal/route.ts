@@ -2,40 +2,59 @@ import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: '2025-12-15.clover',
-})
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-)
+function mustEnv(name: string) {
+  const v = process.env[name]
+  if (!v) throw new Error(`Missing env var: ${name}`)
+  return v
+}
 
 export async function POST(req: Request) {
   try {
-    const auth = req.headers.get('authorization') || ''
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
-    if (!token) return NextResponse.json({ error: 'Missing auth token' }, { status: 401 })
+    // ✅ Read env vars at request-time (not build-time)
+    const STRIPE_SECRET_KEY = mustEnv('STRIPE_SECRET_KEY')
+    const SUPABASE_URL = mustEnv('SUPABASE_URL')
+    const SUPABASE_SERVICE_ROLE_KEY = mustEnv('SUPABASE_SERVICE_ROLE_KEY')
+    const NEXT_PUBLIC_SITE_URL = mustEnv('NEXT_PUBLIC_SITE_URL')
 
-    // Verify user via Supabase Auth
-    const { data: userRes, error: userErr } = await supabaseAdmin.auth.getUser(token)
-    if (userErr || !userRes?.user) {
-      return NextResponse.json({ error: 'Invalid session' }, { status: 401 })
+    const stripe = new Stripe(STRIPE_SECRET_KEY, {
+      apiVersion: '2025-12-15.clover',
+    })
+
+    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
+    })
+
+    // ✅ Auth token
+    const authHeader = req.headers.get('authorization') || ''
+    const token = authHeader.startsWith('Bearer ')
+      ? authHeader.slice('Bearer '.length).trim()
+      : ''
+
+    if (!token) {
+      return NextResponse.json({ error: 'Missing auth token' }, { status: 401 })
     }
 
-    const userId = userRes.user.id
+    // ✅ Validate user
+    const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token)
+    if (userErr || !userData?.user) {
+      return NextResponse.json({ error: 'Invalid auth token' }, { status: 401 })
+    }
 
-    // Get stripe_customer_id from your subscriptions table
-    const { data: subRow, error: subErr } = await supabaseAdmin
+    const userId = userData.user.id
+
+    // ✅ Get stripe customer id from subscriptions table
+    const { data: row, error: rowErr } = await supabaseAdmin
       .from('subscriptions')
-      .select('stripe_customer_id, plan, status')
+      .select('stripe_customer_id')
       .eq('user_id', userId)
       .maybeSingle()
 
-    if (subErr) throw new Error(subErr.message)
+    if (rowErr) throw new Error(rowErr.message)
 
-    const customerId = (subRow?.stripe_customer_id ?? '').trim()
+    const customerId = (row?.stripe_customer_id ?? '').trim()
     if (!customerId) {
       return NextResponse.json(
         { error: 'No Stripe customer found for this user yet.' },
@@ -43,11 +62,10 @@ export async function POST(req: Request) {
       )
     }
 
-    const origin = req.headers.get('origin') || 'http://localhost:3000'
-
+    // ✅ Create Stripe Billing Portal session
     const portal = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${origin}/`,
+      return_url: `${NEXT_PUBLIC_SITE_URL}/billing`,
     })
 
     return NextResponse.json({ url: portal.url }, { status: 200 })
