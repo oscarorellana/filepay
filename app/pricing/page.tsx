@@ -40,7 +40,6 @@ function formatDateShort(iso: string | null | undefined) {
 
 export default function PricingPage() {
   const [email, setEmail] = useState<string | null>(null)
-  const [userId, setUserId] = useState<string | null>(null)
 
   const [sub, setSub] = useState<SubRow | null>(null)
   const [busy, setBusy] = useState(false)
@@ -73,7 +72,6 @@ export default function PricingPage() {
       const { data: u } = await supabase.auth.getUser()
       const user = u.user ?? null
       setEmail(user?.email ?? null)
-      setUserId(user?.id ?? null)
 
       if (!user?.id) {
         setSub(null)
@@ -84,7 +82,8 @@ export default function PricingPage() {
       const { data: sess } = await supabase.auth.getSession()
       const token = sess.session?.access_token
       if (token) {
-        await fetch('/api/pro/pro/sync', {
+        // ✅ FIX: correct path (no /pro/pro)
+        await fetch('/api/pro/sync', {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
         }).catch(() => {})
@@ -128,9 +127,9 @@ export default function PricingPage() {
       })
 
       const json = await res.json().catch(() => ({}))
-      if (!res.ok || !json?.url) throw new Error(json?.error || 'Failed to start Pro checkout')
+      if (!res.ok || !json?.url) throw new Error((json as any)?.error || 'Failed to start Pro checkout')
 
-      window.location.href = json.url
+      window.location.href = (json as any).url
     } catch (e: any) {
       setMsg(e?.message ?? 'Upgrade failed')
       setBusy(false)
