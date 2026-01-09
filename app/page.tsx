@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, DragEvent } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -20,6 +21,27 @@ const PRICE_BY_DAYS: Record<number, number> = {
   7: 3,
   14: 5,
   30: 8,
+}
+
+function useIsMobile(bp = 900) {
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia(`(max-width: ${bp}px)`)
+    const onChange = () => setIsMobile(mq.matches)
+    onChange()
+
+    if (mq.addEventListener) mq.addEventListener('change', onChange)
+    else mq.addListener(onChange)
+
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', onChange)
+      else mq.removeListener(onChange)
+    }
+  }, [bp])
+
+  return isMobile
 }
 
 function uid(len = 12) {
@@ -60,6 +82,7 @@ type SubRow = {
 }
 
 export default function HomePage() {
+  const isMobile = useIsMobile(900)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const [userId, setUserId] = useState<string | null>(null)
@@ -139,7 +162,6 @@ export default function HomePage() {
         // ignore
       }
 
-      // Read subscription row
       const { data: row, error } = await supabase
         .from('subscriptions')
         .select('plan,status,cancel_at_period_end,current_period_end')
@@ -164,11 +186,9 @@ export default function HomePage() {
       mounted = false
       sub?.data?.subscription?.unsubscribe?.()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
-    // cleanup preview blob when changing / unmount
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl)
     }
@@ -193,7 +213,7 @@ export default function HomePage() {
     fileInputRef.current?.click()
   }
 
-  function onDrop(e: React.DragEvent<HTMLDivElement>) {
+  function onDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault()
     if (busy) return
     const f = e.dataTransfer.files?.[0] ?? null
@@ -209,7 +229,7 @@ export default function HomePage() {
     }
 
     try {
-      setAuthStatus('Sending sign-in link…')
+      setAuthStatus('Sending magic link…')
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
@@ -252,7 +272,7 @@ export default function HomePage() {
       body: JSON.stringify({
         file_path: filePath,
         days,
-        created_by_user_id: userId, // optional
+        created_by_user_id: userId,
       }),
     })
 
@@ -289,10 +309,10 @@ export default function HomePage() {
       setStatus('Uploading…')
       const path = await uploadToSupabase(file)
 
-      setStatus('Generating your link…')
+      setStatus('Creating link…')
       const { code } = await createLink(path)
 
-      setStatus(isPro ? 'Finishing up…' : 'Redirecting to checkout…')
+      setStatus(isPro ? 'Finalizing…' : 'Redirecting to payment…')
       await goPayOrProBypass(code)
     } catch (e: any) {
       setStatus(e?.message ?? 'Something went wrong.')
@@ -303,25 +323,41 @@ export default function HomePage() {
   const primaryLabel = busy
     ? 'Working…'
     : isPro
-      ? 'Generate link'
+      ? 'Generate link (Pro)'
       : `Pay ${priceLabel} & generate link`
 
+  // ✅ typed styles (fix TS complaining about computed styles)
+  const pageStyle: CSSProperties = { ...styles.page, padding: isMobile ? 14 : 24 }
+  const headerStyle: CSSProperties = { ...styles.header, flexDirection: isMobile ? 'column' : 'row' }
+  const accountStyle: CSSProperties = { ...styles.account, width: isMobile ? '100%' : 380 }
+  const gridStyle: CSSProperties = {
+    ...styles.grid,
+    gridTemplateColumns: isMobile ? '1fr' : '1.25fr 0.75fr',
+  }
+  const controlsRowStyle: CSSProperties = {
+    ...styles.controlsRow,
+    gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+  }
+  const actionsStyle: CSSProperties = {
+    ...styles.accountActions,
+    justifyContent: isMobile ? 'flex-start' : 'flex-end',
+  }
+
   return (
-    <main style={styles.page}>
+    <main style={pageStyle}>
       <div style={styles.container}>
-        {/* Header */}
-        <header style={styles.header}>
+        <header style={headerStyle}>
           <div style={styles.brand}>
             <div style={styles.logoDot} />
             <div>
               <div style={styles.brandTop}>
-                <h1 style={styles.title}>FilePay</h1>
+                <h1 style={{ ...styles.title, fontSize: isMobile ? 26 : 34 }}>FilePay</h1>
                 <span
                   style={{
                     ...styles.badge,
                     ...(isPro ? styles.badgePro : styles.badgeFree),
                   }}
-                  title={isPro ? planBadge : 'FREE'}
+                  title={planBadge}
                 >
                   {planBadge}
                 </span>
@@ -332,37 +368,30 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div style={styles.account}>
+          <div style={accountStyle}>
             {userEmail ? (
-              <>
-                <div style={styles.accountTop}>
-                  <div style={styles.accountLine}>
-                    Signed in as <b>{userEmail}</b>
-                  </div>
-                  <div style={styles.accountActions}>
-                    <a href="/pricing" style={styles.linkBtn}>
-                      Pricing
-                    </a>
-                    <a href="/billing" style={styles.linkBtn}>
-                    Manage subscription
-                    </a>
-                    <button
-                      type="button"
-                      onClick={signOut}
-                      style={styles.linkBtn}
-                      disabled={busy}
-                    >
-                      Sign out
-                    </button>
-                  </div>
+              <div style={styles.accountTop}>
+                <div style={styles.accountLine}>
+                  Signed in as <b>{userEmail}</b>
                 </div>
-              </>
+                <div style={actionsStyle}>
+                  <a href="/pricing" style={styles.linkBtn}>
+                    Pricing
+                  </a>
+                  <a href="/billing" style={styles.linkBtn}>
+                    Manage subscription
+                  </a>
+                  <button type="button" onClick={signOut} style={styles.linkBtn} disabled={busy}>
+                    Sign out
+                  </button>
+                </div>
+              </div>
             ) : (
               <>
                 <div style={styles.accountLine}>
                   <b>Sign in</b> to unlock Pro perks (if you have them).
                 </div>
-                <div style={styles.authRow}>
+                <div style={{ ...styles.authRow, flexDirection: isMobile ? 'column' : 'row' }}>
                   <input
                     value={authEmail}
                     onChange={(e) => setAuthEmail(e.target.value)}
@@ -381,7 +410,7 @@ export default function HomePage() {
                   </button>
                 </div>
                 {authStatus && <div style={styles.hint}>{authStatus}</div>}
-                <div style={styles.accountActions}>
+                <div style={{ ...styles.accountActions, justifyContent: 'flex-start' }}>
                   <a href="/pricing" style={styles.linkBtn}>
                     View pricing
                   </a>
@@ -391,19 +420,14 @@ export default function HomePage() {
           </div>
         </header>
 
-        {/* Main */}
-        <div style={styles.grid}>
-          {/* Left: create link */}
+        <div style={gridStyle}>
           <section style={styles.card}>
             <div style={styles.cardHeader}>
               <div>
                 <div style={styles.cardTitle}>Create a download link</div>
-                <div style={styles.cardDesc}>
-                  Pick a duration, upload your file, then generate a shareable link.
-                </div>
+                <div style={styles.cardDesc}>Choose duration, upload your file, then generate a link.</div>
               </div>
 
-              {/* Compact price hint */}
               <div style={styles.pricePill}>
                 {isPro ? (
                   <>
@@ -411,14 +435,13 @@ export default function HomePage() {
                   </>
                 ) : (
                   <>
-                    <span style={{ fontWeight: 950 }}>{priceLabel}</span> · {formatDays(days)}
+                    <span style={{ fontWeight: 950 }}>{priceLabel}</span> for {formatDays(days)}
                   </>
                 )}
               </div>
             </div>
 
             <div style={styles.body}>
-              {/* Hidden file input */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -427,7 +450,6 @@ export default function HomePage() {
                 disabled={busy}
               />
 
-              {/* Dropzone */}
               <div
                 style={{
                   ...styles.dropzone,
@@ -441,22 +463,20 @@ export default function HomePage() {
                 tabIndex={0}
                 title="Click to pick a file, or drag & drop"
               >
-                <div style={styles.dropTop}>
+                <div style={{ ...styles.dropTop, flexDirection: isMobile ? 'column' : 'row' }}>
                   <div style={styles.dropIcon}>⬆️</div>
                   <div>
-                    <div style={styles.dropTitle}>
-                      {file ? 'Ready to share' : 'Drop a file here'}
-                    </div>
+                    <div style={styles.dropTitle}>{file ? 'File selected' : 'Drop a file here'}</div>
                     <div style={styles.dropSub}>
                       {file
                         ? `${fileMeta?.name} · ${fileMeta?.size} · ${fileMeta?.type}`
-                        : 'or click to browse (images, PDFs, ZIPs, and more)'}
+                        : 'or click to browse (PNG, JPG, PDF, ZIP, etc.)'}
                     </div>
                   </div>
                 </div>
 
                 {file && (
-                  <div style={styles.dropActions}>
+                  <div style={{ ...styles.dropActions, justifyContent: isMobile ? 'flex-start' : 'flex-end' }}>
                     <button
                       type="button"
                       onClick={(e) => {
@@ -484,8 +504,7 @@ export default function HomePage() {
                 )}
               </div>
 
-              {/* Row: duration + action */}
-              <div style={styles.controlsRow}>
+              <div style={controlsRowStyle}>
                 <div style={styles.field}>
                   <div style={styles.label}>Link duration</div>
                   <select
@@ -500,15 +519,12 @@ export default function HomePage() {
                       </option>
                     ))}
                   </select>
-
                   <div style={styles.hint}>
                     {isPro ? (
-                      <>
-                        Expires after <b>{formatDays(days)}</b>. Included in Pro.
-                      </>
+                      <>Included in Pro.</>
                     ) : (
                       <>
-                        Expires after <b>{formatDays(days)}</b>. Price: <b>{priceLabel}</b>.
+                        Price updates by duration: <b>{priceLabel}</b>
                       </>
                     )}
                   </div>
@@ -524,19 +540,17 @@ export default function HomePage() {
                       ...styles.primaryBtn,
                       opacity: busy || !file ? 0.6 : 1,
                       cursor: busy || !file ? 'not-allowed' : 'pointer',
+                      width: '100%',
                     }}
                   >
                     {primaryLabel}
                   </button>
                   <div style={styles.hint}>
-                    {isPro
-                      ? 'No checkout needed — your link is ready instantly.'
-                      : 'Complete checkout to unlock the download link.'}
+                    {isPro ? 'Pro skips checkout and finalizes instantly.' : 'Pay securely and unlock the download link.'}
                   </div>
                 </div>
               </div>
 
-              {/* Preview */}
               <div style={styles.previewWrap}>
                 <div style={styles.previewHeader}>
                   <div style={styles.previewTitle}>Preview</div>
@@ -550,11 +564,7 @@ export default function HomePage() {
                 <div style={styles.previewBox}>
                   {previewUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={previewUrl}
-                      alt="preview"
-                      style={styles.previewImg}
-                    />
+                    <img src={previewUrl} alt="preview" style={styles.previewImg} />
                   ) : (
                     <div style={styles.previewEmpty}>
                       {file
@@ -567,44 +577,28 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* Status */}
               {status && <div style={styles.statusBox}>{status}</div>}
             </div>
           </section>
 
-          {/* Right: onboarding */}
           <aside style={styles.sideCard}>
             <div style={styles.sideTitle}>How it works</div>
 
-            <Step
-              n="1"
-              title="Upload"
-              text="Choose the file you want to share."
-            />
-            <Step
-              n="2"
-              title="Set a duration"
-              text="Pick how long the link should stay active."
-            />
+            <Step n="1" title="Upload" text="Pick a file from your device." />
+            <Step n="2" title="Set duration" text="Choose how long the download link stays available." />
             <Step
               n="3"
-              title={isPro ? 'Instant access' : 'Unlock access'}
-              text={isPro ? 'Pro skips checkout — link is ready right away.' : 'Checkout unlocks the download link.'}
+              title={isPro ? 'Pro' : 'Payment'}
+              text={isPro ? 'Instant — no checkout needed.' : 'Pay once to unlock the download link.'}
             />
-            <Step
-              n="4"
-              title="Share"
-              text="Send the link to your client. It expires automatically."
-            />
+            <Step n="4" title="Share" text="Send the link to anyone — it works until it expires." />
 
             <div style={styles.divider} />
 
             {!isPro ? (
               <div style={styles.ctaCard}>
                 <div style={{ fontWeight: 950 }}>Skip checkout every time</div>
-                <div style={styles.ctaText}>
-                  Go Pro ($9/mo) to create unlimited links without per-link payments.
-                </div>
+                <div style={styles.ctaText}>Go Pro ($9/mo) to create unlimited links without per-link payments.</div>
                 <a href="/pricing" style={styles.ctaBtn}>
                   Upgrade to Pro →
                 </a>
@@ -612,24 +606,17 @@ export default function HomePage() {
             ) : (
               <div style={styles.ctaCard}>
                 <div style={{ fontWeight: 950 }}>You’re Pro ✅</div>
-                <div style={styles.ctaText}>
-                  Links finalize instantly. Manage billing anytime.
-                </div>
+                <div style={styles.ctaText}>Links finalize instantly. Manage your subscription anytime.</div>
                 <a href="/billing" style={styles.ctaBtn}>
-                  Manage billing →
+                  Manage subscription →
                 </a>
               </div>
             )}
           </aside>
         </div>
 
-        <footer style={styles.footer}>
-          Selected duration: <b>{formatDays(days)}</b>
-          {!isPro && (
-            <>
-              {' '}· Price: <b>{priceLabel}</b>
-            </>
-          )}
+        <footer style={{ ...styles.footer, textAlign: isMobile ? 'left' : 'center' }}>
+          Local MVP · Selected duration: <b>{formatDays(days)}</b>
         </footer>
       </div>
     </main>
@@ -648,9 +635,9 @@ function Step({ n, title, text }: { n: string; title: string; text: string }) {
   )
 }
 
-const styles: Record<string, React.CSSProperties> = {
+const styles: Record<string, CSSProperties> = {
   page: {
-    minHeight: '100vh',
+    minHeight: '100svh', // better on iOS Safari than 100vh
     color: '#fff',
     fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
     background:
@@ -742,6 +729,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     gap: 12,
+    flexWrap: 'wrap',
   },
   cardTitle: { fontWeight: 950, fontSize: 16 },
   cardDesc: { marginTop: 6, fontSize: 13, opacity: 0.75, lineHeight: 1.35 },
@@ -784,9 +772,9 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 16,
   },
   dropTitle: { fontWeight: 950, fontSize: 14 },
-  dropSub: { marginTop: 4, opacity: 0.78, fontSize: 12, lineHeight: 1.35 },
+  dropSub: { marginTop: 4, opacity: 0.78, fontSize: 12, lineHeight: 1.35, wordBreak: 'break-word' },
 
-  dropActions: { marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end' },
+  dropActions: { marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' },
 
   controlsRow: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
 
@@ -838,14 +826,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   hint: { fontSize: 12, opacity: 0.75, lineHeight: 1.35 },
-  codeInline: {
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-    fontSize: 12,
-    padding: '2px 6px',
-    borderRadius: 8,
-    background: 'rgba(255,255,255,0.08)',
-    border: '1px solid rgba(255,255,255,0.10)',
-  },
 
   previewWrap: {
     borderRadius: 18,
@@ -860,6 +840,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'space-between',
     gap: 10,
     alignItems: 'baseline',
+    flexWrap: 'wrap',
   },
   previewTitle: { fontWeight: 950, fontSize: 13 },
   previewMeta: { fontSize: 12, opacity: 0.75 },

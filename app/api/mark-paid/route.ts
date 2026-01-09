@@ -2,22 +2,25 @@ import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
-// Stripe init moved inside POST() for Vercel build safety
-
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-)
+function mustEnv(name: string) {
+  const v = process.env[name]
+  if (!v) throw new Error(`Missing ${name}`)
+  return v
+}
 
 export async function POST(req: Request) {
-  
-  // Stripe is initialized inside the handler (prevents build-time crashes)
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+  // ✅ Initialize inside handler (prevents Vercel build-time crashes)
+  const supabaseAdmin = createClient(
+    mustEnv('SUPABASE_URL'),
+    mustEnv('SUPABASE_SERVICE_ROLE_KEY'),
+    { auth: { persistSession: false } }
+  )
+
+  const stripe = new Stripe(mustEnv('STRIPE_SECRET_KEY'), {
     apiVersion: '2025-12-15.clover',
   })
 
-try {
+  try {
     const body = await req.json().catch(() => ({}))
     const sessionId = (body?.session_id as string | undefined)?.trim()
 
@@ -25,7 +28,7 @@ try {
       return NextResponse.json({ error: 'Missing session_id' }, { status: 400 })
     }
 
-    // 1) pro-bypass for paid links
+    // ✅ 1) Pro bypass: session_id like "pro_<code>"
     if (sessionId.startsWith('pro_')) {
       const code = sessionId.replace(/^pro_/, '').trim()
       if (!code) return NextResponse.json({ error: 'Missing code' }, { status: 400 })
@@ -37,96 +40,64 @@ try {
 
       if (error) throw new Error(error.message)
 
-      return NextResponse.json({ paid: true, code }, { status: 200 })
+      return NextResponse.json({ ok: true, paid: true, code, mode: 'pro_bypass' }, { status: 200 })
     }
 
-    // 2) Real Stripe session
+    // ✅ 2) Normal Stripe Checkout session flow
     const session = await stripe.checkout.sessions.retrieve(sessionId)
 
-    // 2a) subscription => activate Pro
-    if (session.mode === 'subscription') {
-      const userId = (session.metadata?.user_id ?? '').trim()
-      if (!userId) {
-        return NextResponse.json({ error: 'Missing user_id in session metadata' }, { status: 400 })
-      }
-
-      // ✅ Idempotency guard (Pro): if already active, return OK
-      const { data: existingSub, error: subErr } = await supabaseAdmin
-        .from('subscriptions')
-        .select('plan,status,stripe_subscription_id')
-        .eq('user_id', userId)
-        .maybeSingle()
-
-      if (subErr) throw new Error(subErr.message)
-
-      if (existingSub?.plan === 'pro' && existingSub?.status === 'active') {
-        return NextResponse.json({ pro: true, user_id: userId, status: 'active' }, { status: 200 })
-      }
-
-      const subscriptionId =
-        typeof session.subscription === 'string' ? session.subscription : null
-
-      const customerId =
-        typeof session.customer === 'string' ? session.customer : null
-
-      // Pull current_period_end (no TS fights)
-      let currentPeriodEnd: string | null = null
-      if (subscriptionId) {
-        const sub: any = await stripe.subscriptions.retrieve(subscriptionId)
-        const cpe = sub?.current_period_end
-        if (typeof cpe === 'number') currentPeriodEnd = new Date(cpe * 1000).toISOString()
-      }
-
-      const { error } = await supabaseAdmin
-        .from('subscriptions')
-        .upsert(
-          {
-            user_id: userId,
-            plan: 'pro',
-            status: 'active',
-            stripe_customer_id: customerId,
-            stripe_subscription_id: subscriptionId,
-            current_period_end: currentPeriodEnd,
-          },
-          { onConflict: 'user_id' }
-        )
-
-      if (error) throw new Error(error.message)
-
-      return NextResponse.json({ pro: true, user_id: userId, status: 'active' }, { status: 200 })
+    // Optional: Ensure session is actually paid
+    // Stripe typically uses payment_status: "paid" for successful Checkout (payment mode)
+    const paymentStatus = String((session as any)?.payment_status ?? '')
+    if (paymentStatus && paymentStatus !== 'paid') {
+      return NextResponse.json(
+        { error: `Checkout not paid yet (payment_status=${paymentStatus})` },
+        { status: 400 }
+      )
     }
 
-    // 2b) one-time payment => mark link paid + audit columns
+    // You store code in metadata when creating the session in /api/checkout
     const code = (session.metadata?.code ?? '').trim()
     if (!code) {
       return NextResponse.json({ error: 'Missing code in session metadata' }, { status: 400 })
     }
 
-    // ✅ Idempotency guard (paid links)
-    const { data: existingLink, error: exErr } = await supabaseAdmin
-      .from('file_links')
-      .select('paid,stripe_session_id,code')
-      .eq('code', code)
-      .maybeSingle()
-
-    if (exErr) throw new Error(exErr.message)
-
-    if (existingLink?.paid && existingLink?.stripe_session_id === sessionId) {
-      return NextResponse.json({ paid: true, code }, { status: 200 })
-    }
-
-    const { error } = await supabaseAdmin
+    // Mark file link paid
+    const { error: updErr } = await supabaseAdmin
       .from('file_links')
       .update({
         paid: true,
-        stripe_session_id: sessionId,
         paid_at: new Date().toISOString(),
+        stripe_session_id: sessionId,
       })
       .eq('code', code)
 
-    if (error) throw new Error(error.message)
+    if (updErr) throw new Error(updErr.message)
 
-    return NextResponse.json({ paid: true, code }, { status: 200 })
+    // (Optional) store payment record if you have a payments table
+    // If you don’t, you can remove this block safely.
+    // Uncomment ONLY if your schema matches.
+    /*
+    await supabaseAdmin.from('payments').insert({
+      code,
+      stripe_session_id: sessionId,
+      amount_total: session.amount_total ?? null,
+      currency: session.currency ?? null,
+      status: paymentStatus || null,
+      created_at: new Date().toISOString(),
+    }).catch(() => {})
+    */
+
+    return NextResponse.json(
+      {
+        ok: true,
+        paid: true,
+        code,
+        mode: 'stripe_payment',
+        payment_status: paymentStatus || null,
+      },
+      { status: 200 }
+    )
   } catch (err: any) {
     console.error('mark-paid error:', err)
     return NextResponse.json({ error: err?.message ?? 'Server error' }, { status: 500 })

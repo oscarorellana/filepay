@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useMemo, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -27,6 +28,27 @@ type SubRow = {
   current_period_end: string | null // timestamptz ISO
 }
 
+function useIsMobile(bp = 900) {
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia(`(max-width: ${bp}px)`)
+    const onChange = () => setIsMobile(mq.matches)
+    onChange()
+
+    if (mq.addEventListener) mq.addEventListener('change', onChange)
+    else mq.addListener(onChange)
+
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', onChange)
+      else mq.removeListener(onChange)
+    }
+  }, [bp])
+
+  return isMobile
+}
+
 function formatDays(d: number) {
   return `${d} day${d === 1 ? '' : 's'}`
 }
@@ -39,7 +61,10 @@ function formatDateShort(iso: string | null | undefined) {
 }
 
 export default function PricingPage() {
+  const isMobile = useIsMobile(900)
+
   const [email, setEmail] = useState<string | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
 
   const [sub, setSub] = useState<SubRow | null>(null)
   const [busy, setBusy] = useState(false)
@@ -49,8 +74,7 @@ export default function PricingPage() {
   const [calcDays, setCalcDays] = useState<(typeof DAY_OPTIONS)[number]>(14)
   const perLink = useMemo(() => PRICE_BY_DAYS[calcDays] ?? 5, [calcDays])
   const breakEvenLinks = useMemo(() => {
-    // Pro is $9/month
-    const pro = 9
+    const pro = 9 // Pro is $9/month
     return Math.ceil(pro / Math.max(1, perLink))
   }, [perLink])
 
@@ -60,9 +84,9 @@ export default function PricingPage() {
     if (!isPro) return null
     const ends = formatDateShort(sub?.current_period_end)
     if (sub?.cancel_at_period_end) {
-      return ends ? `Pro (scheduled to end ${ends})` : 'Pro (scheduled to end)'
+      return ends ? `Pro · ends ${ends}` : 'Pro · scheduled to end'
     }
-    return ends ? `Pro (renews ${ends})` : 'Pro (active)'
+    return ends ? `Pro · renews ${ends}` : 'Pro · active'
   }, [isPro, sub])
 
   async function load() {
@@ -72,6 +96,7 @@ export default function PricingPage() {
       const { data: u } = await supabase.auth.getUser()
       const user = u.user ?? null
       setEmail(user?.email ?? null)
+      setUserId(user?.id ?? null)
 
       if (!user?.id) {
         setSub(null)
@@ -82,7 +107,6 @@ export default function PricingPage() {
       const { data: sess } = await supabase.auth.getSession()
       const token = sess.session?.access_token
       if (token) {
-        // ✅ FIX: correct path (no /pro/pro)
         await fetch('/api/pro/sync', {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
@@ -127,26 +151,44 @@ export default function PricingPage() {
       })
 
       const json = await res.json().catch(() => ({}))
-      if (!res.ok || !json?.url) throw new Error((json as any)?.error || 'Failed to start Pro checkout')
+      if (!res.ok || !json?.url) throw new Error(json?.error || 'Failed to start Pro checkout')
 
-      window.location.href = (json as any).url
+      window.location.href = json.url
     } catch (e: any) {
       setMsg(e?.message ?? 'Upgrade failed')
       setBusy(false)
     }
   }
 
+  // ===== Responsive styles (no Tailwind; no runtime CSS libs) =====
+  const pageStyle: CSSProperties = { ...styles.page, padding: isMobile ? 14 : 24 }
+  const topStyle: CSSProperties = { ...styles.top, flexDirection: isMobile ? 'column' : 'row' }
+  const topRightStyle: CSSProperties = {
+    ...styles.topRight,
+    justifyItems: isMobile ? 'start' : 'end',
+    width: isMobile ? '100%' : undefined,
+  }
+  const gridStyle: CSSProperties = {
+    ...styles.grid,
+    gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+  }
+  const cardTopStyle: CSSProperties = { ...styles.cardTop, flexDirection: isMobile ? 'column' : 'row' }
+  const actionsRowStyle: CSSProperties = { ...styles.actionsRow, flexDirection: isMobile ? 'column' : 'row' }
+
   return (
-    <main style={styles.page}>
+    <main style={pageStyle}>
       <div style={styles.container}>
         {/* Top */}
-        <header style={styles.top}>
+        <header style={topStyle}>
           <div style={styles.brandRow}>
             <div style={styles.dot} />
             <div>
-              <h1 style={styles.h1}>Pay per link — or never again.</h1>
+              <h1 style={{ ...styles.h1, fontSize: isMobile ? 28 : 34 }}>
+                Pay per link — or never again.
+              </h1>
               <p style={styles.p}>
-                Upload a file and share a secure download link. Pay only when you need it, or go Pro and skip payments.
+                Upload a file and share a secure download link. Pay only when you need it, or go Pro
+                and skip payments.
               </p>
 
               <div style={styles.metaRow}>
@@ -169,7 +211,7 @@ export default function PricingPage() {
             </div>
           </div>
 
-          <div style={styles.topRight}>
+          <div style={topRightStyle}>
             <a href="/" style={styles.linkBtn}>
               ← Back to home
             </a>
@@ -182,10 +224,10 @@ export default function PricingPage() {
         </header>
 
         {/* Plans */}
-        <div style={styles.grid}>
+        <div style={gridStyle}>
           {/* Pay per link */}
           <section style={styles.card}>
-            <div style={styles.cardTop}>
+            <div style={cardTopStyle}>
               <div>
                 <div style={styles.planName}>Pay per link</div>
                 <div style={styles.priceBig}>From $1</div>
@@ -221,7 +263,8 @@ export default function PricingPage() {
                 </select>
 
                 <div style={styles.calcHint}>
-                  Pro ($9/mo) breaks even at <b>{breakEvenLinks}</b> link{breakEvenLinks === 1 ? '' : 's'}.
+                  Pro ($9/mo) breaks even at <b>{breakEvenLinks}</b> link
+                  {breakEvenLinks === 1 ? '' : 's'}.
                 </div>
               </div>
             </div>
@@ -233,7 +276,7 @@ export default function PricingPage() {
 
           {/* Pro */}
           <section style={{ ...styles.card, ...styles.cardPro }}>
-            <div style={styles.cardTop}>
+            <div style={cardTopStyle}>
               <div>
                 <div style={styles.planName}>Pro</div>
                 <div style={styles.priceBig}>$9 / month</div>
@@ -254,20 +297,22 @@ export default function PricingPage() {
               <li>Cancel anytime</li>
             </ul>
 
-            {!isPro ? (
-              <button
-                type="button"
-                onClick={upgradeToPro}
-                style={{ ...styles.primaryBtn, opacity: busy ? 0.75 : 1 }}
-                disabled={busy}
-              >
-                {busy ? 'Starting checkout…' : 'Upgrade to Pro'}
-              </button>
-            ) : (
-              <a href="/billing" style={styles.primaryBtn}>
-                Manage subscription
-              </a>
-            )}
+            <div style={actionsRowStyle}>
+              {!isPro ? (
+                <button
+                  type="button"
+                  onClick={upgradeToPro}
+                  style={{ ...styles.primaryBtn, opacity: busy ? 0.75 : 1, width: '100%' }}
+                  disabled={busy}
+                >
+                  {busy ? 'Starting checkout…' : 'Upgrade to Pro'}
+                </button>
+              ) : (
+                <a href="/billing" style={{ ...styles.primaryBtn, width: '100%' }}>
+                  Manage subscription
+                </a>
+              )}
+            </div>
 
             <div style={styles.trustRow}>
               <div style={styles.trustItem}>Cancel anytime</div>
@@ -288,22 +333,22 @@ export default function PricingPage() {
           <div style={styles.qa}>
             <div style={styles.q}>When should I choose Pro?</div>
             <div style={styles.a}>
-              If you create links regularly (for clients, freelancers, recurring work), Pro removes checkout friction and saves money fast.
+              If you create links regularly (clients, freelancers, recurring work), Pro removes
+              checkout friction and saves money fast.
             </div>
           </div>
 
           <div style={styles.qa}>
             <div style={styles.q}>Can I cancel?</div>
             <div style={styles.a}>
-              Yes — cancel anytime. If you schedule a cancellation, your plan stays active until the end of the current billing period.
+              Yes — cancel anytime. If you schedule a cancellation, your plan stays active until the
+              end of the current billing period.
             </div>
           </div>
 
           <div style={styles.qa}>
             <div style={styles.q}>What if I just need one link?</div>
-            <div style={styles.a}>
-              Use Pay per link. It’s built for one-off sharing and short projects.
-            </div>
+            <div style={styles.a}>Use Pay per link. It’s built for one-off sharing and short projects.</div>
           </div>
         </section>
 
@@ -313,9 +358,9 @@ export default function PricingPage() {
   )
 }
 
-const styles: Record<string, React.CSSProperties> = {
+const styles: Record<string, CSSProperties> = {
   page: {
-    minHeight: '100vh',
+    minHeight: '100svh', // better on iOS Safari than 100vh
     padding: 24,
     fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
     background:
@@ -332,9 +377,11 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 10,
     borderRadius: 999,
     background: 'linear-gradient(135deg, rgba(255,255,255,0.9), rgba(124,58,237,0.9))',
+    boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
   },
   h1: { margin: 0, fontSize: 34, fontWeight: 950, letterSpacing: -0.3, lineHeight: 1.05 },
   p: { margin: '8px 0 0', opacity: 0.78, fontSize: 13, lineHeight: 1.45, maxWidth: 680 },
+
   metaRow: { marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 },
   metaPill: {
     fontSize: 12,
@@ -344,6 +391,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid rgba(255,255,255,0.14)',
     background: 'rgba(255,255,255,0.06)',
     opacity: 0.95,
+    wordBreak: 'break-word',
   },
   metaPillPro: { background: 'rgba(124,58,237,0.18)' },
 
@@ -365,6 +413,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid rgba(59,130,246,0.22)',
     background: 'rgba(59,130,246,0.08)',
   },
+
   cardTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 },
 
   planName: { fontWeight: 950, fontSize: 16 },
@@ -378,6 +427,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 999,
     border: '1px solid rgba(255,255,255,0.14)',
     background: 'rgba(255,255,255,0.06)',
+    whiteSpace: 'nowrap',
   },
   pillPro: { background: 'rgba(255,255,255,0.12)' },
 
@@ -405,7 +455,10 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'white',
     outline: 'none',
     cursor: 'pointer',
+    width: '100%',
   },
+
+  actionsRow: { display: 'flex', gap: 10, alignItems: 'center' },
 
   primaryBtn: {
     display: 'inline-block',
@@ -431,6 +484,7 @@ const styles: Record<string, React.CSSProperties> = {
     textDecoration: 'none',
     cursor: 'pointer',
     textAlign: 'center',
+    width: 'fit-content',
   },
   secondaryBtn: {
     display: 'inline-block',
@@ -453,6 +507,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'white',
     fontWeight: 850,
     textDecoration: 'none',
+    width: 'fit-content',
   },
 
   trustRow: {

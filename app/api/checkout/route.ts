@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 
-// Stripe init moved inside POST() for Vercel build safety
+function mustEnv(name: string) {
+  const v = process.env[name]
+  if (!v) throw new Error(`Missing ${name}`)
+  return v
+}
 
 /**
  * Prices are in CENTS (USD)
@@ -19,14 +23,13 @@ function priceForDaysCents(days: number) {
 }
 
 export async function POST(req: Request) {
-  
-  // Stripe is initialized inside the handler (prevents build-time crashes)
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+  // ✅ Stripe initialized inside handler + hard error if missing env
+  const stripe = new Stripe(mustEnv('STRIPE_SECRET_KEY'), {
     apiVersion: '2025-12-15.clover',
   })
 
-try {
-    const body = await req.json()
+  try {
+    const body = await req.json().catch(() => ({}))
     const code = (body?.code as string | undefined)?.trim()
     const daysRaw = body?.days
 

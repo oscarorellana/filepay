@@ -2,75 +2,57 @@ import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
-// Stripe init moved inside POST() for Vercel build safety
+function mustEnv(name: string) {
+  const v = process.env[name]
+  if (!v) throw new Error(`Missing ${name}`)
+  return v
+}
 
-// Service role para leer subscriptions (server-only)
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-)
+function getOrigin(req: Request) {
+  return req.headers.get('origin') || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+}
 
 export async function POST(req: Request) {
-  
-  // Stripe is initialized inside the handler (prevents build-time crashes)
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-    apiVersion: '2025-12-15.clover',
-  })
+  const stripe = new Stripe(mustEnv('STRIPE_SECRET_KEY'), { apiVersion: '2025-12-15.clover' })
 
-try {
+  const supabaseAdmin = createClient(
+    mustEnv('SUPABASE_URL'),
+    mustEnv('SUPABASE_SERVICE_ROLE_KEY'),
+    { auth: { persistSession: false } }
+  )
+
+  try {
+    const priceId = (process.env.STRIPE_PRO_PRICE_ID ?? '').trim()
+    if (!priceId) {
+      return NextResponse.json({ error: 'Missing STRIPE_PRO_PRICE_ID env var' }, { status: 500 })
+    }
+
     const authHeader = req.headers.get('authorization') || ''
-    const token = authHeader.startsWith('Bearer ')
-      ? authHeader.slice('Bearer '.length).trim()
-      : ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length).trim() : ''
+    if (!token) return NextResponse.json({ error: 'Missing auth token' }, { status: 401 })
 
-    if (!token) {
-      return NextResponse.json({ error: 'Missing Authorization Bearer token' }, { status: 401 })
-    }
+    const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token)
+    if (userErr || !userData?.user) return NextResponse.json({ error: 'Invalid auth token' }, { status: 401 })
 
-    // 1) Validar el usuario usando el access token
-    const { data: userRes, error: userErr } = await supabaseAdmin.auth.getUser(token)
-    if (userErr || !userRes?.user) {
-      return NextResponse.json({ error: 'Invalid session' }, { status: 401 })
-    }
+    const user = userData.user
 
-    const userId = userRes.user.id
+    const origin = getOrigin(req)
 
-    // 2) Leer stripe_customer_id desde tu tabla subscriptions
-    const { data: subRow, error: subErr } = await supabaseAdmin
-      .from('subscriptions')
-      .select('stripe_customer_id, plan, status')
-      .eq('user_id', userId)
-      .maybeSingle()
-
-    if (subErr) throw new Error(subErr.message)
-
-    const customerId = (subRow?.stripe_customer_id ?? '').trim()
-    if (!customerId) {
-      return NextResponse.json(
-        {
-          error:
-            'No stripe_customer_id found for this user. Run /api/pro/sync (or complete a Pro checkout) first.',
-        },
-        { status: 400 }
-      )
-    }
-
-    const origin = req.headers.get('origin') || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
-    const returnUrl = `${origin}/billing`
-
-    // 3) Crear sesión de Customer Portal
-    const portalSession = await stripe.billingPortal.sessions.create({
-      customer: customerId,
-      return_url: returnUrl,
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      line_items: [{ price: priceId, quantity: 1 }],
+      allow_promotion_codes: true,
+      customer_email: user.email ?? undefined,
+      metadata: {
+        user_id: user.id,
+      },
+      success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/pricing`,
     })
 
-    return NextResponse.json({ url: portalSession.url }, { status: 200 })
+    return NextResponse.json({ url: session.url }, { status: 200 })
   } catch (err: any) {
-    console.error('portal error:', err)
-    return NextResponse.json(
-      { error: err?.message ?? 'Portal error' },
-      { status: 500 }
-    )
+    console.error('pro checkout error:', err)
+    return NextResponse.json({ error: err?.message ?? 'Server error' }, { status: 500 })
   }
 }
