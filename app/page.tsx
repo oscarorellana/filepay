@@ -220,26 +220,31 @@ export default function HomePage() {
     if (f) setPickedFile(f)
   }
 
-  async function signInWithEmail() {
-    setAuthStatus('')
-    const email = authEmail.trim()
-    if (!email) {
-      setAuthStatus('Please enter an email.')
-      return
-    }
-
-    try {
-      setAuthStatus('Sending magic link…')
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-      })
-      if (error) throw new Error(error.message)
-      setAuthStatus('Check your email for the sign-in link.')
-    } catch (e: any) {
-      setAuthStatus(e?.message ?? 'Sign-in failed.')
-    }
+async function signInWithEmail() {
+  setAuthStatus('')
+  const email = authEmail.trim()
+  if (!email) {
+    setAuthStatus('Please enter an email.')
+    return
   }
+
+  try {
+    setAuthStatus('Sending magic link…')
+
+    const siteUrl =
+      process.env.NEXT_PUBLIC_SITE_URL?.trim() || window.location.origin
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: `${siteUrl}/auth/callback` },
+    })
+
+    if (error) throw new Error(error.message)
+    setAuthStatus('Check your email for the sign-in link.')
+  } catch (e: any) {
+    setAuthStatus(e?.message ?? 'Sign-in failed.')
+  }
+}
 
   async function signOut() {
     setAuthStatus('')
