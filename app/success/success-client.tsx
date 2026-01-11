@@ -17,14 +17,17 @@ type FinalizeResponse = {
 
 export default function SuccessClient() {
   const sp = useSearchParams()
-  const sessionId = useMemo(
-  () => (sp?.get('session_id') ?? '').trim(),
-  [sp]
-)
+
+  const sessionId = useMemo(() => (sp?.get('session_id') ?? '').trim(), [sp])
 
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [json, setJson] = useState<FinalizeResponse | null>(null)
+
+  // If payment link: redirect to /dl/[code]
+  const redirectToDownload = (code: string) => {
+    window.location.href = `/dl/${encodeURIComponent(code)}`
+  }
 
   async function finalize() {
     setMsg('')
@@ -48,14 +51,24 @@ export default function SuccessClient() {
 
       if (!r.ok) throw new Error(j?.error || 'Finalization failed')
 
-      // ✅ Require a meaningful success signal
       const okPaid = j?.paid === true
       const okPro = j?.pro === true
+
       if (!okPaid && !okPro) {
         throw new Error('Finalization did not return a paid link or a Pro activation.')
       }
 
-      setMsg(okPro ? 'Pro activated ✅' : 'Payment finalized ✅')
+      // ✅ If this was a paid link purchase, go straight to download page
+      if (okPaid) {
+        const code = (j?.code ?? '').trim()
+        if (!code) throw new Error('Finalized payment but missing code.')
+        setMsg('Payment finalized ✅ Redirecting…')
+        redirectToDownload(code)
+        return
+      }
+
+      // ✅ If Pro purchase, stay here and show buttons
+      setMsg('Pro activated ✅')
     } catch (e: any) {
       setMsg(`❌ ${e?.message ?? 'Something went wrong'}`)
     } finally {
@@ -119,8 +132,7 @@ const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: '100svh',
     padding: 18,
-    fontFamily:
-      'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
+    fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
     background:
       'radial-gradient(1200px 600px at 18% 0%, rgba(124,58,237,0.22), transparent 60%), radial-gradient(900px 500px at 90% 10%, rgba(59,130,246,0.18), transparent 55%), #07070a',
     color: 'white',
