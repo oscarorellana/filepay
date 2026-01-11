@@ -83,10 +83,10 @@ export default function SuccessClient() {
         setMsg('Payment finalized ✅ Your link is ready.')
 
         // Optional: auto-redirect after a few seconds (comment out if you prefer no redirect)
-        setTimeout(() => {
-          window.location.href = url
-        }, 2500)
-
+       // setTimeout(() => {
+         // window.location.href = url
+       // }, 2500)
+        setTimeout(() => setCopied(false), 3000)
         return
       }
 
