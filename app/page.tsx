@@ -120,9 +120,7 @@ export default function HomePage() {
   const planBadge = useMemo(() => {
     if (isPro) {
       const endShort = formatDateShort(proEndsAt)
-      if (proCancelAtPeriodEnd) {
-        return endShort ? `PRO · Ends ${endShort}` : 'PRO · Ending'
-      }
+      if (proCancelAtPeriodEnd) return endShort ? `PRO · Ends ${endShort}` : 'PRO · Ending'
       return endShort ? `PRO · Renews ${endShort}` : 'PRO · Active'
     }
     return 'FREE'
@@ -135,7 +133,6 @@ export default function HomePage() {
     async function refreshUser() {
       const { data } = await supabase.auth.getUser()
       const u = data.user ?? null
-
       if (!mounted) return
 
       setUserId(u?.id ?? null)
@@ -177,10 +174,7 @@ export default function HomePage() {
     }
 
     refreshUser()
-
-    sub = supabase.auth.onAuthStateChange(() => {
-      refreshUser()
-    })
+    sub = supabase.auth.onAuthStateChange(() => refreshUser())
 
     return () => {
       mounted = false
@@ -220,31 +214,29 @@ export default function HomePage() {
     if (f) setPickedFile(f)
   }
 
-async function signInWithEmail() {
-  setAuthStatus('')
-  const email = authEmail.trim()
-  if (!email) {
-    setAuthStatus('Please enter an email.')
-    return
+  async function signInWithEmail() {
+    setAuthStatus('')
+    const email = authEmail.trim()
+    if (!email) {
+      setAuthStatus('Please enter an email.')
+      return
+    }
+
+    try {
+      setAuthStatus('Sending magic link…')
+      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || window.location.origin
+
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: `${siteUrl}/auth/callback` },
+      })
+
+      if (error) throw new Error(error.message)
+      setAuthStatus('Check your email for the sign-in link.')
+    } catch (e: any) {
+      setAuthStatus(e?.message ?? 'Sign-in failed.')
+    }
   }
-
-  try {
-    setAuthStatus('Sending magic link…')
-
-    const siteUrl =
-      process.env.NEXT_PUBLIC_SITE_URL?.trim() || window.location.origin
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${siteUrl}/auth/callback` },
-    })
-
-    if (error) throw new Error(error.message)
-    setAuthStatus('Check your email for the sign-in link.')
-  } catch (e: any) {
-    setAuthStatus(e?.message ?? 'Sign-in failed.')
-  }
-}
 
   async function signOut() {
     setAuthStatus('')
@@ -325,16 +317,12 @@ async function signInWithEmail() {
     }
   }
 
-  const primaryLabel = busy
-    ? 'Working…'
-    : isPro
-      ? 'Generate link (Pro)'
-      : `Pay ${priceLabel} & generate link`
+  const primaryLabel = busy ? 'Working…' : isPro ? 'Generate link (Pro)' : `Pay ${priceLabel} & generate link`
 
   // ✅ typed styles (fix TS complaining about computed styles)
   const pageStyle: CSSProperties = { ...styles.page, padding: isMobile ? 14 : 24 }
   const headerStyle: CSSProperties = { ...styles.header, flexDirection: isMobile ? 'column' : 'row' }
-  const accountStyle: CSSProperties = { ...styles.account, width: isMobile ? '100%' : 380 }
+  const accountStyle: CSSProperties = { ...styles.account, width: isMobile ? '100%' : 400 }
   const gridStyle: CSSProperties = {
     ...styles.grid,
     gridTemplateColumns: isMobile ? '1fr' : '1.25fr 0.75fr',
@@ -352,50 +340,82 @@ async function signInWithEmail() {
     <main style={pageStyle}>
       <div style={styles.container}>
         <header style={headerStyle}>
-          <div style={styles.brand}>
-            <div style={styles.logoDot} />
-            <div>
-              <div style={styles.brandTop}>
-                <h1 style={{ ...styles.title, fontSize: isMobile ? 26 : 34 }}>FilePay</h1>
-                <span
-                  style={{
-                    ...styles.badge,
-                    ...(isPro ? styles.badgePro : styles.badgeFree),
-                  }}
-                  title={planBadge}
-                >
-                  {planBadge}
-                </span>
-              </div>
-              <p style={styles.subtitle}>
-                Upload a file, choose how long the link stays active, and share a secure download link.
-              </p>
+          {/* LEFT: Hero */}
+          <div style={styles.hero}>
+            <div style={styles.brandRow}>
+              <div style={styles.logoDot} />
+              <div style={styles.brandLabel}>FilePay</div>
+
+              <span
+                style={{
+                  ...styles.badge,
+                  ...(isPro ? styles.badgePro : styles.badgeFree),
+                }}
+                title={planBadge}
+              >
+                {planBadge}
+              </span>
+            </div>
+
+            <h1 style={{ ...styles.h1, fontSize: isMobile ? 28 : 40,lineHeight: 1.15,marginBottom: 12,}}>
+            Create paid download links for your files.
+            </h1>
+
+            <p style={{ ...styles.subtitle, maxWidth: 720 }}>
+            Upload a file, choose how long the link stays active, pay once, and share it with anyone.
+            Recipients don’t need an account.
+            </p>
+
+            <div
+        style={{
+        ...styles.heroBullets,
+          flexWrap: isMobile ? 'wrap' : 'nowrap',
+        }}
+>
+        <div style={styles.heroBullet}>✅ You set duration & price</div>
+        <div style={styles.heroBullet}>💳 Pay once, generate link</div>
+        <div style={styles.heroBullet}>⏳ Link expires automatically</div>
+        </div>
+
+            <div style={styles.trustRow2}>
+              <span style={styles.trustPill}>Secure payments via Stripe</span>
+              <span style={styles.trustPill}>Files stored on Supabase</span>
+              <span style={styles.trustPill}>Auto-expiring links</span>
             </div>
           </div>
 
+          {/* RIGHT: Account */}
           <div style={accountStyle}>
             {userEmail ? (
-              <div style={styles.accountTop}>
-                <div style={styles.accountLine}>
-                  Signed in as <b>{userEmail}</b>
+              <>
+                <div style={styles.accountTop}>
+                  <div style={styles.accountLine}>
+                    Signed in as <b>{userEmail}</b>
+                  </div>
+
+                  <div style={actionsStyle}>
+                    <a href="/pricing" style={styles.linkBtn}>
+                      Pricing
+                    </a>
+                    <a href="/billing" style={styles.linkBtn}>
+                      Manage
+                    </a>
+                    <button type="button" onClick={signOut} style={styles.linkBtn} disabled={busy}>
+                      Sign out
+                    </button>
+                  </div>
                 </div>
-                <div style={actionsStyle}>
-                  <a href="/pricing" style={styles.linkBtn}>
-                    Pricing
-                  </a>
-                  <a href="/billing" style={styles.linkBtn}>
-                    Manage subscription
-                  </a>
-                  <button type="button" onClick={signOut} style={styles.linkBtn} disabled={busy}>
-                    Sign out
-                  </button>
+
+                <div style={styles.accountHint}>
+                  {isPro ? 'Pro: links finalize instantly (no per-link checkout).' : 'Tip: Pro skips checkout every time.'}
                 </div>
-              </div>
+              </>
             ) : (
               <>
                 <div style={styles.accountLine}>
-                  <b>Sign in</b> to unlock Pro perks (if you have them).
+                  <b>Sign in</b> to manage your subscription (optional).
                 </div>
+
                 <div style={{ ...styles.authRow, flexDirection: isMobile ? 'column' : 'row' }}>
                   <input
                     value={authEmail}
@@ -405,16 +425,13 @@ async function signInWithEmail() {
                     disabled={busy}
                     inputMode="email"
                   />
-                  <button
-                    type="button"
-                    onClick={signInWithEmail}
-                    style={styles.primaryBtnSmall}
-                    disabled={busy}
-                  >
+                  <button type="button" onClick={signInWithEmail} style={styles.primaryBtnSmall} disabled={busy}>
                     Sign in
                   </button>
                 </div>
+
                 {authStatus && <div style={styles.hint}>{authStatus}</div>}
+
                 <div style={{ ...styles.accountActions, justifyContent: 'flex-start' }}>
                   <a href="/pricing" style={styles.linkBtn}>
                     View pricing
@@ -512,18 +529,14 @@ async function signInWithEmail() {
               <div style={controlsRowStyle}>
                 <div style={styles.field}>
                   <div style={styles.label}>Link duration</div>
-                  <select
-                    value={days}
-                    onChange={(e) => setDays(Number(e.target.value))}
-                    disabled={busy}
-                    style={styles.select}
-                  >
+                  <select value={days} onChange={(e) => setDays(Number(e.target.value))} disabled={busy} style={styles.select}>
                     {DAY_OPTIONS.map((d) => (
                       <option key={d} value={d}>
                         {formatDays(d)}
                       </option>
                     ))}
                   </select>
+
                   <div style={styles.hint}>
                     {isPro ? (
                       <>Included in Pro.</>
@@ -550,20 +563,14 @@ async function signInWithEmail() {
                   >
                     {primaryLabel}
                   </button>
-                  <div style={styles.hint}>
-                    {isPro ? 'Pro skips checkout and finalizes instantly.' : 'Pay securely and unlock the download link.'}
-                  </div>
+                  <div style={styles.hint}>{isPro ? 'Pro skips checkout and finalizes instantly.' : 'Pay securely and unlock the download link.'}</div>
                 </div>
               </div>
 
               <div style={styles.previewWrap}>
                 <div style={styles.previewHeader}>
                   <div style={styles.previewTitle}>Preview</div>
-                  {fileMeta && (
-                    <div style={styles.previewMeta}>
-                      {fileMeta.isImage ? 'Image' : 'File'} · {prettyBytes(fileMeta.sizeBytes)}
-                    </div>
-                  )}
+                  {fileMeta && <div style={styles.previewMeta}>{fileMeta.isImage ? 'Image' : 'File'} · {prettyBytes(fileMeta.sizeBytes)}</div>}
                 </div>
 
                 <div style={styles.previewBox}>
@@ -572,11 +579,7 @@ async function signInWithEmail() {
                     <img src={previewUrl} alt="preview" style={styles.previewImg} />
                   ) : (
                     <div style={styles.previewEmpty}>
-                      {file
-                        ? fileMeta?.isImage
-                          ? 'Preview unavailable.'
-                          : 'No preview for this file type.'
-                        : 'Select an image to see a preview here.'}
+                      {file ? (fileMeta?.isImage ? 'Preview unavailable.' : 'No preview for this file type.') : 'Select an image to see a preview here.'}
                     </div>
                   )}
                 </div>
@@ -591,11 +594,7 @@ async function signInWithEmail() {
 
             <Step n="1" title="Upload" text="Pick a file from your device." />
             <Step n="2" title="Set duration" text="Choose how long the download link stays available." />
-            <Step
-              n="3"
-              title={isPro ? 'Pro' : 'Payment'}
-              text={isPro ? 'Instant — no checkout needed.' : 'Pay once to unlock the download link.'}
-            />
+            <Step n="3" title={isPro ? 'Pro' : 'Payment'} text={isPro ? 'Instant — no checkout needed.' : 'Pay once to unlock the download link.'} />
             <Step n="4" title="Share" text="Send the link to anyone — it works until it expires." />
 
             <div style={styles.divider} />
@@ -642,7 +641,7 @@ function Step({ n, title, text }: { n: string; title: string; text: string }) {
 
 const styles: Record<string, CSSProperties> = {
   page: {
-    minHeight: '100svh', // better on iOS Safari than 100vh
+    minHeight: '100svh',
     color: '#fff',
     fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
     background:
@@ -659,31 +658,61 @@ const styles: Record<string, CSSProperties> = {
     marginBottom: 16,
   },
 
-  brand: { display: 'flex', gap: 12, alignItems: 'flex-start' },
+  hero: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 6,
+  },
+
+  brandRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
+    marginBottom: 10,
+  },
+  brandLabel: {
+    fontWeight: 950,
+    letterSpacing: -0.3,
+    opacity: 0.95,
+  },
+
   logoDot: {
     width: 12,
     height: 12,
     borderRadius: 999,
-    marginTop: 10,
     background: 'linear-gradient(135deg, rgba(255,255,255,0.9), rgba(124,58,237,0.9))',
     boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
   },
-  brandTop: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
-  title: { margin: 0, fontSize: 34, letterSpacing: -0.4 },
-  subtitle: { margin: '6px 0 0', opacity: 0.8, maxWidth: 560, lineHeight: 1.35, fontSize: 13 },
+
+  h1: {
+    margin: 0,
+    fontWeight: 980,
+    letterSpacing: -0.7,
+    lineHeight: 1.05,
+  },
+
+  subtitle2: {
+    margin: '10px 0 0',
+    opacity: 0.82,
+    maxWidth: 760,
+    lineHeight: 1.45,
+    fontSize: 13,
+  },
 
   badge: {
     fontSize: 12,
     fontWeight: 950,
-    padding: '4px 10px',
+    padding: '5px 10px',
     borderRadius: 999,
     border: '1px solid rgba(255,255,255,0.14)',
+    background: 'rgba(0,0,0,0.22)',
   },
   badgePro: { background: 'rgba(124,58,237,0.22)' },
   badgeFree: { background: 'rgba(255,255,255,0.06)' },
 
   account: {
-    width: 380,
+    width: 400,
     borderRadius: 18,
     border: '1px solid rgba(255,255,255,0.10)',
     background: 'rgba(255,255,255,0.04)',
@@ -693,6 +722,13 @@ const styles: Record<string, CSSProperties> = {
   accountTop: { display: 'grid', gap: 10 },
   accountLine: { fontSize: 13, opacity: 0.92, lineHeight: 1.35 },
   accountActions: { display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' },
+
+  accountHint: {
+    marginTop: 10,
+    opacity: 0.7,
+    fontSize: 12,
+    lineHeight: 1.35,
+  },
 
   linkBtn: {
     display: 'inline-block',
@@ -716,6 +752,44 @@ const styles: Record<string, CSSProperties> = {
     background: 'rgba(0,0,0,0.35)',
     color: 'white',
     outline: 'none',
+  },
+
+  hint: { fontSize: 12, opacity: 0.75, lineHeight: 1.35 },
+
+ heroBullets: {
+  marginTop: 12,
+  display: 'flex',
+  gap: 10,
+  alignItems: 'center',
+  justifyContent: 'flex-start',
+  maxWidth: 720,
+  whiteSpace: 'nowrap',
+  overflowX: 'auto',
+paddingBottom: 2,
+},
+  heroBullet: {
+    padding: '7px 10px',
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.12)',
+    background: 'rgba(0,0,0,0.22)',
+    fontWeight: 850,
+  },
+
+  trustRow2: {
+    marginTop: 12,
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'center',
+    opacity: 0.78,
+    fontSize: 12,
+  },
+  trustPill: {
+    padding: '6px 10px',
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.12)',
+    background: 'rgba(255,255,255,0.06)',
+    fontWeight: 850,
   },
 
   grid: { display: 'grid', gridTemplateColumns: '1.25fr 0.75fr', gap: 16 },
@@ -829,8 +903,6 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
     cursor: 'pointer',
   },
-
-  hint: { fontSize: 12, opacity: 0.75, lineHeight: 1.35 },
 
   previewWrap: {
     borderRadius: 18,
