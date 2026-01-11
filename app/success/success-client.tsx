@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 
 type FinalizeResponse = {
@@ -15,35 +15,50 @@ type FinalizeResponse = {
   error?: string
 }
 
+function buildShareUrl(code: string) {
+  // Use current origin (works on Vercel + localhost)
+  return `${window.location.origin}/dl/${encodeURIComponent(code)}`
+}
+
 export default function SuccessClient() {
   const sp = useSearchParams()
 
+  // Important: searchParams can be "not ready" in first render sometimes
   const sessionId = useMemo(() => (sp?.get('session_id') ?? '').trim(), [sp])
 
   const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState('')
+  const [msg, setMsg] = useState<string>('Preparing…')
   const [json, setJson] = useState<FinalizeResponse | null>(null)
 
-  // If payment link: redirect to /dl/[code]
-  const redirectToDownload = (code: string) => {
-    window.location.href = `/dl/${encodeURIComponent(code)}`
+  const [shareUrl, setShareUrl] = useState<string>('')
+  const [copied, setCopied] = useState(false)
+
+  // Avoid double-finalize (React strict mode, re-renders, etc.)
+  const finalizedFor = useRef<string>('')
+
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    } catch {
+      // fallback: select prompt
+      window.prompt('Copy this link:', text)
+    }
   }
 
-  async function finalize() {
+  async function finalize(sid: string) {
     setMsg('')
     setJson(null)
-
-    if (!sessionId) {
-      setMsg('❌ Missing session_id in URL.')
-      return
-    }
+    setShareUrl('')
+    setCopied(false)
 
     setBusy(true)
     try {
       const r = await fetch('/api/mark-paid', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId }),
+        body: JSON.stringify({ session_id: sid }),
       })
 
       const j = (await r.json().catch(() => ({}))) as FinalizeResponse
@@ -58,17 +73,25 @@ export default function SuccessClient() {
         throw new Error('Finalization did not return a paid link or a Pro activation.')
       }
 
-      // ✅ If this was a paid link purchase, go straight to download page
       if (okPaid) {
         const code = (j?.code ?? '').trim()
         if (!code) throw new Error('Finalized payment but missing code.')
-        setMsg('Payment finalized ✅ Redirecting…')
-        redirectToDownload(code)
+
+        const url = buildShareUrl(code)
+        setShareUrl(url)
+
+        setMsg('Payment finalized ✅ Your link is ready.')
+
+        // Optional: auto-redirect after a few seconds (comment out if you prefer no redirect)
+        setTimeout(() => {
+          window.location.href = url
+        }, 2500)
+
         return
       }
 
-      // ✅ If Pro purchase, stay here and show buttons
-      setMsg('Pro activated ✅')
+      // Pro success
+      setMsg('Pro activated ✅ You can manage billing anytime.')
     } catch (e: any) {
       setMsg(`❌ ${e?.message ?? 'Something went wrong'}`)
     } finally {
@@ -77,7 +100,17 @@ export default function SuccessClient() {
   }
 
   useEffect(() => {
-    finalize()
+    // Don’t show an error if sessionId isn't ready yet — just wait.
+    if (!sessionId) {
+      setMsg('Preparing…')
+      return
+    }
+
+    // Guard: finalize only once per sessionId
+    if (finalizedFor.current === sessionId) return
+    finalizedFor.current = sessionId
+
+    finalize(sessionId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId])
 
@@ -87,31 +120,65 @@ export default function SuccessClient() {
         <h1 style={styles.h1}>Payment successful ✅</h1>
 
         <div style={styles.block}>
-          <div style={styles.label}>Finalizing…</div>
-          <div style={styles.mono}>Session ID</div>
-          <div style={styles.mono2}>{sessionId || '(missing)'}</div>
+          <div style={styles.label}>Session</div>
+          <div style={styles.mono2}>{sessionId || '(waiting...)'}</div>
         </div>
 
         {msg && <div style={styles.msg}>{msg}</div>}
 
-        <div style={styles.row}>
-          <button
-            type="button"
-            onClick={finalize}
-            disabled={busy}
-            style={{ ...styles.btn, opacity: busy ? 0.7 : 1 }}
-          >
-            {busy ? 'Working…' : 'Retry finalize'}
-          </button>
+        {/* ✅ Share link for paid links */}
+        {shareUrl && (
+          <div style={styles.shareBox}>
+            <div style={styles.shareTitle}>Share this download link</div>
 
-          <a href="/" style={styles.linkBtn}>
-            Back to home
-          </a>
+            <div style={styles.shareRow}>
+              <input value={shareUrl} readOnly style={styles.shareInput} />
+              <button
+                type="button"
+                onClick={() => copy(shareUrl)}
+                style={{ ...styles.btn, whiteSpace: 'nowrap' }}
+                disabled={busy}
+              >
+                {copied ? 'Copied ✅' : 'Copy'}
+              </button>
+            </div>
 
-          <a href="/billing" style={styles.linkBtn}>
-            Manage subscription
-          </a>
-        </div>
+            <div style={styles.shareActions}>
+              <a href={shareUrl} style={styles.linkBtn}>
+                Open download page
+              </a>
+              <a href="/" style={styles.linkBtn}>
+                Back to home
+              </a>
+            </div>
+
+            <div style={styles.hint}>
+              Redirecting automatically in a moment… (or use the buttons above)
+            </div>
+          </div>
+        )}
+
+        {/* Buttons for pro / generic */}
+        {!shareUrl && (
+          <div style={styles.row}>
+            <button
+              type="button"
+              onClick={() => sessionId && finalize(sessionId)}
+              disabled={busy || !sessionId}
+              style={{ ...styles.btn, opacity: busy ? 0.7 : 1 }}
+            >
+              {busy ? 'Working…' : 'Retry finalize'}
+            </button>
+
+            <a href="/" style={styles.linkBtn}>
+              Back to home
+            </a>
+
+            <a href="/billing" style={styles.linkBtn}>
+              Manage subscription
+            </a>
+          </div>
+        )}
 
         {json && (
           <details style={styles.details}>
@@ -119,10 +186,6 @@ export default function SuccessClient() {
             <pre style={styles.pre}>{JSON.stringify(json, null, 2)}</pre>
           </details>
         )}
-
-        <div style={styles.hint}>
-          If you already paid, wait a few seconds and retry. (In production we’ll use webhooks to avoid this.)
-        </div>
       </div>
     </main>
   )
@@ -140,7 +203,7 @@ const styles: Record<string, React.CSSProperties> = {
     placeItems: 'center',
   },
   card: {
-    width: 'min(820px, 100%)',
+    width: 'min(900px, 100%)',
     borderRadius: 18,
     border: '1px solid rgba(255,255,255,0.10)',
     background: 'rgba(255,255,255,0.04)',
@@ -159,7 +222,6 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 6,
   },
   label: { opacity: 0.75, fontSize: 12 },
-  mono: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', opacity: 0.9, fontSize: 12 },
   mono2: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, wordBreak: 'break-all' },
   msg: {
     padding: 12,
@@ -187,7 +249,29 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'white',
     fontWeight: 850,
     textDecoration: 'none',
+    display: 'inline-block',
   },
+  shareBox: {
+    borderRadius: 16,
+    border: '1px solid rgba(255,255,255,0.10)',
+    background: 'rgba(0,0,0,0.22)',
+    padding: 14,
+    display: 'grid',
+    gap: 10,
+  },
+  shareTitle: { fontWeight: 950, fontSize: 13 },
+  shareRow: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center' },
+  shareInput: {
+    width: '100%',
+    padding: '10px 12px',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.14)',
+    background: 'rgba(0,0,0,0.35)',
+    color: 'white',
+    outline: 'none',
+    fontSize: 12,
+  },
+  shareActions: { display: 'flex', flexWrap: 'wrap', gap: 10 },
   details: {
     borderRadius: 14,
     border: '1px solid rgba(255,255,255,0.10)',
@@ -204,5 +288,5 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     overflowX: 'auto',
   },
-  hint: { opacity: 0.65, fontSize: 12, lineHeight: 1.35 },
+  hint: { opacity: 0.7, fontSize: 12, lineHeight: 1.35 },
 }
