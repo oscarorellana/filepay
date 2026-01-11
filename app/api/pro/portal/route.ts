@@ -2,57 +2,73 @@ import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
-function mustEnv(name: string) {
-  const v = process.env[name]
-  if (!v) throw new Error(`Missing ${name}`)
-  return v
-}
+export const dynamic = 'force-dynamic'
 
-function getOrigin(req: Request) {
-  return req.headers.get('origin') || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { persistSession: false } }
+)
+
+function getStripe() {
+  const key = process.env.STRIPE_SECRET_KEY
+  if (!key) throw new Error('Missing STRIPE_SECRET_KEY')
+  return new Stripe(key, { apiVersion: '2025-12-15.clover' })
 }
 
 export async function POST(req: Request) {
-  const stripe = new Stripe(mustEnv('STRIPE_SECRET_KEY'), { apiVersion: '2025-12-15.clover' })
-
-  const supabaseAdmin = createClient(
-    mustEnv('SUPABASE_URL'),
-    mustEnv('SUPABASE_SERVICE_ROLE_KEY'),
-    { auth: { persistSession: false } }
-  )
-
   try {
-    const priceId = (process.env.STRIPE_PRO_PRICE_ID ?? '').trim()
-    if (!priceId) {
-      return NextResponse.json({ error: 'Missing STRIPE_PRO_PRICE_ID env var' }, { status: 500 })
+    const authHeader = req.headers.get('authorization') || ''
+    const token = authHeader.startsWith('Bearer ')
+      ? authHeader.slice('Bearer '.length).trim()
+      : ''
+
+    if (!token) {
+      return NextResponse.json({ error: 'Missing auth token' }, { status: 401 })
     }
 
-    const authHeader = req.headers.get('authorization') || ''
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length).trim() : ''
-    if (!token) return NextResponse.json({ error: 'Missing auth token' }, { status: 401 })
+    const { data: userRes, error: userErr } =
+      await supabaseAdmin.auth.getUser(token)
 
-    const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token)
-    if (userErr || !userData?.user) return NextResponse.json({ error: 'Invalid auth token' }, { status: 401 })
+    if (userErr || !userRes?.user) {
+      return NextResponse.json({ error: 'Invalid session' }, { status: 401 })
+    }
 
-    const user = userData.user
+    const userId = userRes.user.id
 
-    const origin = getOrigin(req)
+    const { data: row } = await supabaseAdmin
+      .from('subscriptions')
+      .select('stripe_customer_id')
+      .eq('user_id', userId)
+      .maybeSingle()
 
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      line_items: [{ price: priceId, quantity: 1 }],
-      allow_promotion_codes: true,
-      customer_email: user.email ?? undefined,
-      metadata: {
-        user_id: user.id,
-      },
-      success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/pricing`,
+    const customerId = row?.stripe_customer_id
+    if (!customerId) {
+      return NextResponse.json(
+        { error: 'No Stripe customer for user' },
+        { status: 400 }
+      )
+    }
+
+    const stripe = getStripe()
+
+    const origin =
+      req.headers.get('origin') ||
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      'http://localhost:3000'
+
+    const portal = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: `${origin}/billing`,
+      configuration: process.env.STRIPE_BILLING_PORTAL_CONFIG_ID, // 🔥 THIS
     })
 
-    return NextResponse.json({ url: session.url }, { status: 200 })
+    return NextResponse.json({ url: portal.url })
   } catch (err: any) {
-    console.error('pro checkout error:', err)
-    return NextResponse.json({ error: err?.message ?? 'Server error' }, { status: 500 })
+    console.error(err)
+    return NextResponse.json(
+      { error: err?.message ?? 'Server error' },
+      { status: 500 }
+    )
   }
 }

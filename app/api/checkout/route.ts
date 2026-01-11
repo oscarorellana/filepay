@@ -1,11 +1,7 @@
 import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 
-function mustEnv(name: string) {
-  const v = process.env[name]
-  if (!v) throw new Error(`Missing ${name}`)
-  return v
-}
+export const dynamic = 'force-dynamic'
 
 /**
  * Prices are in CENTS (USD)
@@ -22,12 +18,21 @@ function priceForDaysCents(days: number) {
   return map[days] ?? 500
 }
 
-export async function POST(req: Request) {
-  // ✅ Stripe initialized inside handler + hard error if missing env
-  const stripe = new Stripe(mustEnv('STRIPE_SECRET_KEY'), {
-    apiVersion: '2025-12-15.clover',
-  })
+function getOrigin(req: Request) {
+  return (
+    req.headers.get('origin') ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    'http://localhost:3000'
+  )
+}
 
+function getStripe() {
+  const key = (process.env.STRIPE_SECRET_KEY ?? '').trim()
+  if (!key) throw new Error('Missing STRIPE_SECRET_KEY env var')
+  return new Stripe(key, { apiVersion: '2025-12-15.clover' })
+}
+
+export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}))
     const code = (body?.code as string | undefined)?.trim()
@@ -41,10 +46,8 @@ export async function POST(req: Request) {
     const safeDays = [1, 3, 7, 14, 30].includes(daysNum) ? daysNum : 14
     const unitAmountCents = priceForDaysCents(safeDays)
 
-    const origin =
-      req.headers.get('origin') ||
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      'http://localhost:3000'
+    const stripe = getStripe()
+    const origin = getOrigin(req)
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
@@ -61,10 +64,21 @@ export async function POST(req: Request) {
           quantity: 1,
         },
       ],
+
+      // ✅ Keep metadata at the Session level (nice for dashboards / webhooks)
       metadata: {
         code,
         days: String(safeDays),
       },
+
+      // ✅ ALSO put it on the PaymentIntent (super reliable for finalize fallback)
+      payment_intent_data: {
+        metadata: {
+          code,
+          days: String(safeDays),
+        },
+      },
+
       success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/cancel`,
     })

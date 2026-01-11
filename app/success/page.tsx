@@ -1,44 +1,49 @@
 'use client'
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 
-type MarkPaidResponse =
-  | { paid: true; code: string; paid_links_30d?: number }
-  | { pro: true; user_id: string; status?: string }
-  | { error: string }
-
-export default function SuccessPage() {
-  const [sessionId, setSessionId] = useState<string>('')
-
-  // Read session_id from URL without Next's searchParams typing issues
-  useEffect(() => {
-    try {
-      const sp = new URLSearchParams(window.location.search)
-      const sid = (sp.get('session_id') ?? '').trim()
-      setSessionId(sid)
-    } catch {
-      setSessionId('')
-    }
-  }, [])
-
-  return <SuccessInner sessionId={sessionId} />
+type FinalizeResult = {
+  ok?: boolean
+  paid?: boolean
+  code?: string
+  pro?: boolean
+  current_period_end?: string | null
+  cancel_at_period_end?: boolean
+  error?: string
 }
 
-function SuccessInner({ sessionId }: { sessionId: string }) {
+function formatDateShort(iso: string | null | undefined) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+export default function SuccessPage() {
+  const search = useSearchParams()
+  const sessionId = (search?.get('session_id') ?? '').trim()
+
   const [busy, setBusy] = useState(false)
-  const [res, setRes] = useState<MarkPaidResponse | null>(null)
+  const [status, setStatus] = useState<'idle' | 'working' | 'ok' | 'err'>('idle')
+  const [msg, setMsg] = useState<string>('')
+  const [result, setResult] = useState<FinalizeResult | null>(null)
 
-  const isProResult = !!(res && 'pro' in res && res.pro === true)
-  const isPaidLinkResult = !!(res && 'paid' in res && res.paid === true)
+  const isPaid = useMemo(() => result?.paid === true && typeof result?.code === 'string', [result])
+  const isPro = useMemo(() => result?.pro === true, [result])
 
-  const finalize = useCallback(async () => {
+  async function finalize() {
+    setMsg('')
+    setResult(null)
+
     if (!sessionId) {
-      setRes({ error: 'Missing session_id in URL.' })
+      setStatus('err')
+      setMsg('Missing session_id in URL.')
       return
     }
 
     setBusy(true)
-    setRes(null)
+    setStatus('working')
 
     try {
       const r = await fetch('/api/mark-paid', {
@@ -47,158 +52,119 @@ function SuccessInner({ sessionId }: { sessionId: string }) {
         body: JSON.stringify({ session_id: sessionId }),
       })
 
-      const json = (await r.json().catch(() => ({}))) as any
-      if (!r.ok) throw new Error(json?.error || 'Finalize failed')
+      const json = (await r.json().catch(() => ({}))) as FinalizeResult
+      setResult(json)
 
-      // Paid link result
-      if (json?.paid === true && typeof json?.code === 'string') {
-        setRes({ paid: true, code: json.code, paid_links_30d: json.paid_links_30d })
-        return
+      if (!r.ok) {
+        throw new Error(json?.error || 'Finalization failed')
       }
 
-      // Pro subscription result
-      if (json?.pro === true && typeof json?.user_id === 'string') {
-        setRes({ pro: true, user_id: json.user_id, status: json.status ?? 'active' })
-        return
+      // ✅ Accept BOTH valid “success” shapes:
+      const okPaid = json?.paid === true && typeof json?.code === 'string'
+      const okPro = json?.pro === true
+
+      if (!okPaid && !okPro) {
+        throw new Error('Finalization did not return a paid link or a Pro activation.')
       }
 
-      throw new Error('Finalization did not return a paid link or a Pro activation.')
+      setStatus('ok')
+      setMsg('Finalized ✅')
     } catch (e: any) {
-      setRes({ error: e?.message ?? 'Something went wrong' })
+      setStatus('err')
+      setMsg(e?.message ?? 'Something went wrong')
     } finally {
       setBusy(false)
     }
-  }, [sessionId])
+  }
 
   useEffect(() => {
-    if (sessionId) finalize()
-  }, [sessionId, finalize])
-
-  const title = useMemo(() => {
-    if (isPaidLinkResult) return 'Payment successful ✅'
-    if (isProResult) return 'Pro activated ✅'
-    return 'Payment successful ✅'
-  }, [isPaidLinkResult, isProResult])
-
-  const subtitle = useMemo(() => {
-    if (busy) return 'Finalizing your purchase…'
-    if (isPaidLinkResult) return 'Your link is ready.'
-    if (isProResult) return 'Your subscription is active.'
-    return 'Finalizing…'
-  }, [busy, isPaidLinkResult, isProResult])
+    finalize()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId])
 
   return (
     <main style={styles.page}>
       <div style={styles.container}>
         <div style={styles.card}>
-          <div style={styles.header}>
-            <div style={styles.dot} />
-            <div>
-              <h1 style={styles.h1}>{title}</h1>
-              <p style={styles.p}>{subtitle}</p>
+          <div style={styles.h1}>Payment successful ✅</div>
+          <div style={styles.p}>
+            {status === 'working' ? 'Finalizing…' : status === 'ok' ? 'Done.' : status === 'err' ? 'Something went wrong' : ''}
+          </div>
+
+          <div style={styles.kv}>
+            <div style={styles.k}>
+              Session ID
+            </div>
+            <div style={styles.v}>
+              <code style={styles.code}>{sessionId || '(missing)'}</code>
             </div>
           </div>
 
-          <div style={styles.body}>
-            <div style={styles.kv}>
-              <div style={styles.k}>Session ID</div>
-              <div style={styles.v}>
-                <code style={styles.code}>{sessionId || '(missing)'}</code>
+          {status === 'ok' && isPro && (
+            <div style={styles.okBox}>
+              <div style={styles.okTitle}>Pro activated ✅</div>
+              <div style={styles.okText}>
+                {result?.cancel_at_period_end
+                  ? `Scheduled to end ${formatDateShort(result?.current_period_end) || '(date pending)'}`
+                  : `Renews ${formatDateShort(result?.current_period_end) || '(date pending)'}`}
+              </div>
+              <a href="/" style={styles.btnPrimary}>
+                Back to home
+              </a>
+              <a href="/billing" style={styles.btnSecondary}>
+                Manage subscription
+              </a>
+            </div>
+          )}
+
+          {status === 'ok' && isPaid && (
+            <div style={styles.okBox}>
+              <div style={styles.okTitle}>Link unlocked ✅</div>
+              <div style={styles.okText}>
+                Code: <b>{result?.code}</b>
+              </div>
+              <a href={`/d/${result?.code}`} style={styles.btnPrimary}>
+                Go to download
+              </a>
+              <a href="/" style={styles.btnSecondary}>
+                Back to home
+              </a>
+            </div>
+          )}
+
+          {status === 'err' && (
+            <div style={styles.errBox}>
+              <div style={styles.errTitle}>We couldn’t finalize the purchase.</div>
+              <div style={styles.errText}>❌ {msg || 'Unknown error'}</div>
+
+              <div style={styles.actions}>
+                <button
+                  type="button"
+                  onClick={finalize}
+                  disabled={busy}
+                  style={{ ...styles.btnPrimary, opacity: busy ? 0.7 : 1 }}
+                >
+                  {busy ? 'Retrying…' : 'Retry finalize'}
+                </button>
+                <a href="/" style={styles.btnSecondary}>
+                  Back to home
+                </a>
+              </div>
+
+              <div style={styles.hint}>
+                If you already paid, wait a few seconds and retry. (In production we’ll use webhooks to avoid this.)
               </div>
             </div>
+          )}
 
-            {busy && (
-              <div style={styles.notice}>
-                <span style={styles.noticeDot} />
-                <div>
-                  <div style={styles.noticeTitle}>Working…</div>
-                  <div style={styles.noticeText}>Please wait a moment.</div>
-                </div>
-              </div>
-            )}
-
-            {!busy && isPaidLinkResult && (
-              <div style={{ display: 'grid', gap: 12 }}>
-                <div style={styles.successBox}>
-                  <div style={styles.successTitle}>Your download is unlocked.</div>
-                  <div style={styles.successText}>
-                    Code: <b>{(res as any).code}</b>
-                  </div>
-                </div>
-
-                <div style={styles.row}>
-                  <a style={styles.primaryBtn} href={`/dl/${(res as any).code}`}>
-                    Go to download page
-                  </a>
-                  <a style={styles.secondaryBtn} href="/">
-                    Back to home
-                  </a>
-                </div>
-              </div>
-            )}
-
-            {!busy && isProResult && (
-              <div style={{ display: 'grid', gap: 12 }}>
-                <div style={styles.successBoxAlt}>
-                  <div style={styles.successTitle}>Pro is active 🎉</div>
-                  <div style={styles.successText}>
-                    You can now create links without paying per link.
-                  </div>
-                </div>
-
-                <div style={styles.row}>
-                  <a style={styles.primaryBtn} href="/">
-                    Back to home
-                  </a>
-                  <a style={styles.secondaryBtn} href="/pricing">
-                    View pricing
-                  </a>
-                </div>
-              </div>
-            )}
-
-            {!busy && res && 'error' in res && (
-              <div style={{ display: 'grid', gap: 12 }}>
-                <div style={styles.errorBox}>
-                  <div style={styles.errorTitle}>Something went wrong</div>
-                  <div style={styles.errorText}>We couldn’t finalize the purchase.</div>
-                  <div style={{ marginTop: 10 }}>
-                    <b>❌ {res.error}</b>
-                  </div>
-                </div>
-
-                <div style={styles.row}>
-                  <button style={styles.primaryBtn} onClick={finalize}>
-                    Retry finalize
-                  </button>
-                  <a style={styles.secondaryBtn} href="/">
-                    Back to home
-                  </a>
-                </div>
-
-                <div style={styles.tip}>
-                  If you already paid, wait a few seconds and retry. (In production we’ll use webhooks to avoid this.)
-                </div>
-              </div>
-            )}
-
-            {!busy && !res && !sessionId && (
-              <div style={styles.errorBox}>
-                <div style={styles.errorTitle}>Missing session_id</div>
-                <div style={styles.errorText}>
-                  Stripe should redirect here with <code style={styles.code}>?session_id=...</code>
-                </div>
-                <div style={{ marginTop: 12 }}>
-                  <a style={styles.secondaryBtn} href="/">
-                    Back to home
-                  </a>
-                </div>
-              </div>
-            )}
-          </div>
+          {/* Debug (small) */}
+          {result && (
+            <details style={styles.details}>
+              <summary style={styles.summary}>Show response</summary>
+              <pre style={styles.pre}>{JSON.stringify(result, null, 2)}</pre>
+            </details>
+          )}
         </div>
-
-        <footer style={styles.footer}>Local MVP · Success supports paid links + Pro subscriptions</footer>
       </div>
     </main>
   )
@@ -206,128 +172,110 @@ function SuccessInner({ sessionId }: { sessionId: string }) {
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    minHeight: '100vh',
-    padding: 24,
-    color: '#fff',
+    minHeight: '100svh',
+    padding: 18,
     fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
     background:
-      'radial-gradient(1200px 600px at 18% 0%, rgba(124,58,237,0.26), transparent 60%), radial-gradient(900px 500px at 90% 10%, rgba(59,130,246,0.22), transparent 55%), #07070a',
+      'radial-gradient(1200px 600px at 18% 0%, rgba(124,58,237,0.22), transparent 60%), radial-gradient(900px 500px at 90% 10%, rgba(59,130,246,0.18), transparent 55%), #07070a',
+    color: 'white',
   },
-  container: { maxWidth: 860, margin: '0 auto' },
+  container: { maxWidth: 760, margin: '0 auto' },
   card: {
     borderRadius: 18,
     border: '1px solid rgba(255,255,255,0.10)',
     background: 'rgba(255,255,255,0.04)',
     boxShadow: '0 18px 40px rgba(0,0,0,0.35)',
-    overflow: 'hidden',
-  },
-  header: {
     padding: 16,
-    display: 'flex',
+    display: 'grid',
     gap: 12,
-    alignItems: 'center',
-    borderBottom: '1px solid rgba(255,255,255,0.08)',
   },
-  dot: {
-    width: 12,
-    height: 12,
-    borderRadius: 999,
-    background: 'linear-gradient(135deg, rgba(255,255,255,0.9), rgba(124,58,237,0.9))',
-    boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
-  },
-  h1: { margin: 0, fontSize: 26, fontWeight: 950, letterSpacing: -0.2 },
-  p: { margin: '6px 0 0', opacity: 0.8, lineHeight: 1.35 },
-  body: { padding: 16, display: 'grid', gap: 14 },
+  h1: { fontSize: 22, fontWeight: 950 },
+  p: { opacity: 0.8, fontSize: 13 },
 
-  kv: { display: 'grid', gridTemplateColumns: '120px 1fr', gap: 10, alignItems: 'center' },
-  k: { opacity: 0.7, fontSize: 12, fontWeight: 800 },
-  v: { fontSize: 12 },
-
-  code: {
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-    fontSize: 12,
-    padding: '2px 6px',
-    borderRadius: 8,
-    background: 'rgba(255,255,255,0.08)',
-    border: '1px solid rgba(255,255,255,0.12)',
-  },
-
-  notice: {
-    display: 'flex',
-    gap: 10,
-    alignItems: 'center',
+  kv: {
+    display: 'grid',
+    gap: 6,
     padding: 12,
     borderRadius: 14,
     border: '1px solid rgba(255,255,255,0.10)',
-    background: 'rgba(0,0,0,0.22)',
+    background: 'rgba(0,0,0,0.20)',
   },
-  noticeDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 999,
-    background: 'rgba(59,130,246,0.9)',
-    boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
+  k: { opacity: 0.7, fontSize: 12 },
+  v: { fontSize: 12, fontWeight: 800 },
+  code: {
+    display: 'inline-block',
+    padding: '6px 8px',
+    borderRadius: 10,
+    border: '1px solid rgba(255,255,255,0.10)',
+    background: 'rgba(0,0,0,0.25)',
+    overflowWrap: 'anywhere',
   },
-  noticeTitle: { fontWeight: 900 },
-  noticeText: { opacity: 0.8, fontSize: 13, marginTop: 2 },
 
-  successBox: {
-    padding: 14,
-    borderRadius: 14,
-    border: '1px solid rgba(16,185,129,0.25)',
-    background: 'rgba(16,185,129,0.10)',
+  okBox: {
+    padding: 12,
+    borderRadius: 16,
+    border: '1px solid rgba(34,197,94,0.25)',
+    background: 'rgba(34,197,94,0.10)',
+    display: 'grid',
+    gap: 10,
   },
-  successBoxAlt: {
-    padding: 14,
-    borderRadius: 14,
-    border: '1px solid rgba(59,130,246,0.25)',
-    background: 'rgba(59,130,246,0.10)',
+  okTitle: { fontWeight: 950 },
+  okText: { opacity: 0.9, fontSize: 13, lineHeight: 1.35 },
+
+  errBox: {
+    padding: 12,
+    borderRadius: 16,
+    border: '1px solid rgba(239,68,68,0.25)',
+    background: 'rgba(239,68,68,0.10)',
+    display: 'grid',
+    gap: 10,
   },
-  successTitle: { fontWeight: 950, fontSize: 14 },
-  successText: { marginTop: 6, opacity: 0.85, fontSize: 13, lineHeight: 1.35 },
+  errTitle: { fontWeight: 950 },
+  errText: { opacity: 0.9, fontSize: 13, lineHeight: 1.35 },
 
-  errorBox: {
-    padding: 14,
-    borderRadius: 14,
-    border: '1px solid rgba(244,63,94,0.28)',
-    background: 'rgba(244,63,94,0.10)',
-  },
-  errorTitle: { fontWeight: 950, fontSize: 14 },
-  errorText: { marginTop: 6, opacity: 0.9, fontSize: 13, lineHeight: 1.35 },
+  actions: { display: 'flex', gap: 10, flexWrap: 'wrap' },
 
-  row: { display: 'flex', gap: 10, flexWrap: 'wrap' },
-
-  primaryBtn: {
-    padding: '12px 14px',
-    borderRadius: 14,
+  btnPrimary: {
+    padding: '10px 12px',
+    borderRadius: 12,
     border: '1px solid rgba(255,255,255,0.16)',
     background: 'linear-gradient(135deg, rgba(255,255,255,0.95), rgba(255,255,255,0.78))',
     color: '#0b0b10',
     fontWeight: 950,
     cursor: 'pointer',
     textDecoration: 'none',
-    boxShadow: '0 12px 28px rgba(0,0,0,0.35)',
+    display: 'inline-block',
   },
-  secondaryBtn: {
-    padding: '12px 14px',
-    borderRadius: 14,
+  btnSecondary: {
+    padding: '10px 12px',
+    borderRadius: 12,
     border: '1px solid rgba(255,255,255,0.14)',
     background: 'rgba(255,255,255,0.06)',
     color: 'white',
-    fontWeight: 850,
+    fontWeight: 900,
     cursor: 'pointer',
     textDecoration: 'none',
+    display: 'inline-block',
   },
+  hint: { opacity: 0.7, fontSize: 12, lineHeight: 1.35 },
 
-  tip: {
-    opacity: 0.7,
-    fontSize: 12,
-    lineHeight: 1.35,
-    padding: 12,
+  details: {
+    marginTop: 6,
     borderRadius: 14,
     border: '1px solid rgba(255,255,255,0.10)',
     background: 'rgba(0,0,0,0.18)',
+    padding: 10,
   },
-
-  footer: { marginTop: 14, opacity: 0.6, fontSize: 12 },
+  summary: { cursor: 'pointer', fontWeight: 900, fontSize: 12, opacity: 0.9 },
+  pre: {
+    margin: 0,
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.10)',
+    background: 'rgba(0,0,0,0.22)',
+    fontSize: 11,
+    lineHeight: 1.35,
+    overflowX: 'auto',
+  },
 }
