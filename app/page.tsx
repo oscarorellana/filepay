@@ -764,8 +764,6 @@ const styles: Record<string, CSSProperties> = {
   justifyContent: 'flex-start',
   maxWidth: 720,
   whiteSpace: 'nowrap',
-  overflowX: 'auto',
-paddingBottom: 2,
 },
   heroBullet: {
     padding: '7px 10px',
