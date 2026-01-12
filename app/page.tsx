@@ -130,48 +130,47 @@ export default function HomePage() {
     let sub: any
     let mounted = true
 
-    async function refreshUser() {
-      const { data } = await supabase.auth.getUser()
-      const u = data.user ?? null
-      if (!mounted) return
+async function refreshUser() {
+  // ✅ Use session first (more reliable on first load)
+  const { data: sessData } = await supabase.auth.getSession()
+  const session = sessData.session ?? null
+  const u = session?.user ?? null
 
-      setUserId(u?.id ?? null)
-      setUserEmail(u?.email ?? null)
+  if (!mounted) return
 
-      if (!u?.id) {
-        setIsPro(false)
-        setProCancelAtPeriodEnd(false)
-        setProEndsAt(null)
-        return
-      }
+  setUserId(u?.id ?? null)
+  setUserEmail(u?.email ?? null)
 
-      // Best-effort sync (so cancel/renew updates show)
-      try {
-        const { data: sess } = await supabase.auth.getSession()
-        const token = sess.session?.access_token
-        if (token) {
-          await fetch('/api/pro/sync', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}` },
-          }).catch(() => {})
-        }
-      } catch {
-        // ignore
-      }
+  if (!u?.id) {
+    setIsPro(false)
+    setProCancelAtPeriodEnd(false)
+    setProEndsAt(null)
+    return
+  }
 
-      const { data: row, error } = await supabase
-        .from('subscriptions')
-        .select('plan,status,cancel_at_period_end,current_period_end')
-        .eq('user_id', u.id)
-        .maybeSingle()
+  // ✅ Always try sync if we have token
+  const token = session?.access_token
+  if (token) {
+    await fetch('/api/pro/sync', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {})
+  }
 
-      const subRow = (row ?? null) as SubRow | null
-      const pro = !error && subRow?.plan === 'pro' && subRow?.status === 'active'
+  // Now read subscriptions
+  const { data: row, error } = await supabase
+    .from('subscriptions')
+    .select('plan,status,cancel_at_period_end,current_period_end')
+    .eq('user_id', u.id)
+    .maybeSingle()
 
-      setIsPro(Boolean(pro))
-      setProCancelAtPeriodEnd(Boolean(subRow?.cancel_at_period_end))
-      setProEndsAt(subRow?.current_period_end ?? null)
-    }
+  const subRow = (row ?? null) as SubRow | null
+  const pro = !error && subRow?.plan === 'pro' && subRow?.status === 'active'
+
+  setIsPro(Boolean(pro))
+  setProCancelAtPeriodEnd(Boolean(subRow?.cancel_at_period_end))
+  setProEndsAt(subRow?.current_period_end ?? null)
+}
 
     refreshUser()
     sub = supabase.auth.onAuthStateChange(() => refreshUser())
