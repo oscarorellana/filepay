@@ -126,60 +126,102 @@ export default function HomePage() {
     return 'FREE'
   }, [isPro, proCancelAtPeriodEnd, proEndsAt])
 
-  useEffect(() => {
-    let sub: any
-    let mounted = true
+useEffect(() => {
+  let sub: any
+  let mounted = true
 
-async function refreshUser() {
-  // ✅ Use session first (more reliable on first load)
-  const { data: sessData } = await supabase.auth.getSession()
-  const session = sessData.session ?? null
-  const u = session?.user ?? null
+  async function refreshUser() {
+    try {
+      // 1) session primero (más confiable en App Router)
+      const { data: sessData } = await supabase.auth.getSession()
+      const session = sessData.session ?? null
+      const u = session?.user ?? null
 
-  if (!mounted) return
+      if (!mounted) return
 
-  setUserId(u?.id ?? null)
-  setUserEmail(u?.email ?? null)
+      setUserId(u?.id ?? null)
+      setUserEmail(u?.email ?? null)
 
-  if (!u?.id) {
-    setIsPro(false)
-    setProCancelAtPeriodEnd(false)
-    setProEndsAt(null)
-    return
-  }
+      if (!u?.id) {
+        setIsPro(false)
+        setProCancelAtPeriodEnd(false)
+        setProEndsAt(null)
+        return
+      }
 
-  // ✅ Always try sync if we have token
-  const token = session?.access_token
-  if (token) {
-    await fetch('/api/pro/sync', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    }).catch(() => {})
-  }
+      // 2) sync best-effort (trae cancel/renew/current_period_end)
+      const token = session?.access_token
+      if (token) {
+        await fetch('/api/pro/sync', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {})
+      }
 
-  // Now read subscriptions
-  const { data: row, error } = await supabase
-    .from('subscriptions')
-    .select('plan,status,cancel_at_period_end,current_period_end')
-    .eq('user_id', u.id)
-    .maybeSingle()
+      // 3) Reintenta leer DB (Stripe/Supabase a veces tardan 0.5-2s)
+      let tries = 0
+      let subRow: SubRow | null = null
+      let lastErr: any = null
 
-  const subRow = (row ?? null) as SubRow | null
-  const pro = !error && subRow?.plan === 'pro' && subRow?.status === 'active'
+      while (tries < 3) {
+        const { data: row, error } = await supabase
+          .from('subscriptions')
+          .select('plan,status,cancel_at_period_end,current_period_end')
+          .eq('user_id', u.id)
+          .maybeSingle()
 
-  setIsPro(Boolean(pro))
-  setProCancelAtPeriodEnd(Boolean(subRow?.cancel_at_period_end))
-  setProEndsAt(subRow?.current_period_end ?? null)
-}
+        if (!error) {
+          subRow = (row ?? null) as SubRow | null
+          const pro = subRow?.plan === 'pro' && subRow?.status === 'active'
 
-    refreshUser()
-    sub = supabase.auth.onAuthStateChange(() => refreshUser())
+          // si ya es pro, o si al menos ya existe row, paramos
+          if (pro || subRow) break
+        } else {
+          lastErr = error
+        }
 
-    return () => {
-      mounted = false
-      sub?.data?.subscription?.unsubscribe?.()
+        tries += 1
+        // espera cortita antes del siguiente intento
+        await new Promise((r) => setTimeout(r, 800))
+      }
+
+      // si hubo error y nunca obtuvimos row, no crasheamos
+      if (lastErr && !subRow) {
+        // opcional: console.warn('subscriptions read error:', lastErr)
+      }
+
+      const pro = subRow?.plan === 'pro' && subRow?.status === 'active'
+      setIsPro(Boolean(pro))
+      setProCancelAtPeriodEnd(Boolean(subRow?.cancel_at_period_end))
+      setProEndsAt(subRow?.current_period_end ?? null)
+    } catch {
+      // no rompas el home por un fallo temporal
     }
-  }, [])
+  }
+
+  // first load
+  refreshUser()
+
+  // auth changes
+  sub = supabase.auth.onAuthStateChange(() => {
+    refreshUser()
+  })
+
+  // ✅ SUPER importante: cuando vuelves desde Stripe, refresca
+  const onFocus = () => refreshUser()
+  const onVis = () => {
+    if (!document.hidden) refreshUser()
+  }
+  window.addEventListener('focus', onFocus)
+  document.addEventListener('visibilitychange', onVis)
+
+  return () => {
+    mounted = false
+    sub?.data?.subscription?.unsubscribe?.()
+    window.removeEventListener('focus', onFocus)
+    document.removeEventListener('visibilitychange', onVis)
+  }
+}, [])
 
   useEffect(() => {
     return () => {
