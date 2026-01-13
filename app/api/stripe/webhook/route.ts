@@ -3,7 +3,6 @@ import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
-export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 function getStripe() {
@@ -43,6 +42,7 @@ function boolish(v: unknown): boolean {
   return Boolean(v)
 }
 
+// --- Helpers you already had (kept) ---
 async function markFileLinkPaid({
   stripe,
   supabaseAdmin,
@@ -52,20 +52,14 @@ async function markFileLinkPaid({
   supabaseAdmin: ReturnType<typeof getSupabaseAdmin>
   session: Stripe.Checkout.Session
 }) {
-  // Try session.metadata.code first
   let code = ((session.metadata?.code ?? '') as string).trim()
 
-  // Fallback: PaymentIntent metadata
   if (!code && typeof session.payment_intent === 'string') {
     const pi = await stripe.paymentIntents.retrieve(session.payment_intent)
     code = ((pi.metadata?.code ?? '') as string).trim()
   }
 
-  if (!code) {
-    // If you ever see this in logs, it means your Checkout Session for paid links
-    // is missing metadata.code (or PI metadata.code).
-    throw new Error('Missing code in session metadata')
-  }
+  if (!code) throw new Error('Missing code in session metadata')
 
   const { error } = await supabaseAdmin
     .from('file_links')
@@ -73,7 +67,6 @@ async function markFileLinkPaid({
     .eq('code', code)
 
   if (error) throw new Error(error.message)
-
   return { code }
 }
 
@@ -89,11 +82,9 @@ async function activateProFromCheckout({
   const userId = ((session.metadata?.user_id ?? '') as string).trim()
   if (!userId) throw new Error('Missing user_id in session metadata')
 
-  const subId =
-    typeof session.subscription === 'string' ? session.subscription : null
+  const subId = typeof session.subscription === 'string' ? session.subscription : null
   const custId = typeof session.customer === 'string' ? session.customer : null
 
-  // Pull renewal/cancel fields from the subscription if possible
   let currentPeriodEndIso: string | null = null
   let cancelAtPeriodEnd = false
 
@@ -148,7 +139,6 @@ async function syncProBySubscriptionId({
   supabaseAdmin: ReturnType<typeof getSupabaseAdmin>
   stripeSubscriptionId: string
 }) {
-  // Find the user row that matches this subscription
   const { data: row, error: rowErr } = await supabaseAdmin
     .from('subscriptions')
     .select('user_id, plan, status, stripe_customer_id, stripe_subscription_id')
@@ -177,12 +167,9 @@ async function syncProBySubscriptionId({
       boolish((sub as any)?.cancel_at_period_end) ||
       (typeof (sub as any)?.cancel_at === 'number' && (sub as any).cancel_at > 0)
     stripeCustomerId =
-      typeof (sub as any)?.customer === 'string'
-        ? ((sub as any).customer as string)
-        : stripeCustomerId
+      typeof (sub as any)?.customer === 'string' ? ((sub as any).customer as string) : stripeCustomerId
   }
 
-  // Map to DB status
   let dbStatus = stripeStatus
   if (stripeStatus === 'active' || stripeStatus === 'trialing') dbStatus = 'active'
   if (stripeStatus === 'canceled') dbStatus = 'canceled'
@@ -219,6 +206,28 @@ async function syncProBySubscriptionId({
   }
 }
 
+// --- Idempotency gate ---
+async function alreadyProcessed(
+  supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
+  event: Stripe.Event
+): Promise<boolean> {
+  // Insert event.id; if it already exists => duplicate => skip.
+  const { error } = await supabaseAdmin
+    .from('stripe_events')
+    .insert({ id: event.id, type: event.type })
+
+  // Duplicate key => we already processed it
+  if (error) {
+    const msg = (error as any)?.message ?? ''
+    const code = (error as any)?.code ?? ''
+    if (code === '23505' || msg.toLowerCase().includes('duplicate')) return true
+    // other DB error should be surfaced
+    throw new Error(msg || 'Failed to record stripe event')
+  }
+
+  return false
+}
+
 export async function POST(req: Request) {
   const stripe = getStripe()
   const supabaseAdmin = getSupabaseAdmin()
@@ -240,21 +249,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
     }
 
-    // --- Handle events you care about ---
+    // ✅ Idempotency: skip duplicates (Vercel retries / Stripe retries / local+vercel)
+    const duplicate = await alreadyProcessed(supabaseAdmin, event)
+    if (duplicate) {
+      return NextResponse.json({ received: true, duplicate: true }, { status: 200 })
+    }
+
     switch (event.type) {
-      /**
-       * ✅ Best single event for Checkout success (one-time and subscriptions)
-       */
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session
 
-        // Strong detection (same idea as your mark-paid)
         const hasSubId = typeof (session as any).subscription === 'string'
         const hasUserId =
           typeof (session as any).metadata?.user_id === 'string' &&
           (session as any).metadata.user_id.trim().length > 0
-        const isSubscription =
-          (session as any).mode === 'subscription' || hasSubId || hasUserId
+        const isSubscription = (session as any).mode === 'subscription' || hasSubId || hasUserId
 
         if (isSubscription) {
           const out = await activateProFromCheckout({ stripe, supabaseAdmin, session })
@@ -263,13 +272,9 @@ export async function POST(req: Request) {
           const out = await markFileLinkPaid({ stripe, supabaseAdmin, session })
           console.log('webhook: link paid', out)
         }
-
         break
       }
 
-      /**
-       * ✅ Keeps renew date fresh (especially useful if your DB sometimes shows null)
-       */
       case 'invoice.paid': {
         const invoice = event.data.object as Stripe.Invoice
         const subId = typeof (invoice as any).subscription === 'string' ? (invoice as any).subscription : null
@@ -280,9 +285,6 @@ export async function POST(req: Request) {
         break
       }
 
-      /**
-       * ✅ Catch cancels / schedule cancels / reactivations
-       */
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
         const sub = event.data.object as Stripe.Subscription
@@ -294,23 +296,13 @@ export async function POST(req: Request) {
         break
       }
 
-      // Optional: if you ever use async payment methods
-      case 'checkout.session.async_payment_succeeded':
-      case 'checkout.session.async_payment_failed': {
-        console.log('webhook async checkout:', event.type)
-        break
-      }
-
       default:
-        // ignore unhandled events
         break
     }
 
     return NextResponse.json({ received: true }, { status: 200 })
   } catch (err: any) {
     console.error('stripe webhook error:', err)
-    // IMPORTANT: return 200 only if you want Stripe to stop retrying.
-    // Here we return 500 so Stripe retries if something transient failed.
     return NextResponse.json({ error: err?.message ?? 'Server error' }, { status: 500 })
   }
 }
