@@ -1,21 +1,8 @@
 import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
-import { Resend } from 'resend'
 
 export const dynamic = 'force-dynamic'
-
-function getResend() {
-  const key = (process.env.RESEND_API_KEY ?? '').trim()
-  if (!key) throw new Error('Missing RESEND_API_KEY env var')
-  return new Resend(key)
-}
-
-function getEmailFrom() {
-  const from = (process.env.EMAIL_FROM ?? '').trim()
-  if (!from) throw new Error('Missing EMAIL_FROM env var')
-  return from
-}
 
 function getStripe() {
   const key = (process.env.STRIPE_SECRET_KEY ?? '').trim()
@@ -144,8 +131,7 @@ export async function POST(req: Request) {
         { status: 200 }
       )
     }
-
-    // 2b) ✅ One-time payment => mark file link as paid (IDEMPOTENT + 1 EMAIL)
+// 2b) ✅ One-time payment => mark file link as paid (IDEMPOTENT)
     // Try session metadata first
     let code = ((session as any)?.metadata?.code ?? '').trim()
 
@@ -162,79 +148,18 @@ export async function POST(req: Request) {
     // ✅ Idempotent finalize:
     // - store paid_session_id so this session cannot re-send email
     // - allow retries with SAME session_id safely
-    const { data: updated, error: upErr } = await supabaseAdmin
-      .from('file_links')
-      .update({
-        paid: true,
-        paid_at: nowIso,
-        paid_session_id: sessionId,
-      })
-      .eq('code', code)
-      .or(`paid_session_id.is.null,paid_session_id.eq.${sessionId}`)
-      .select('code, paid, paid_session_id')
-      .maybeSingle()
+const { error: upErr } = await supabaseAdmin
+  .from('file_links')
+  .update({
+    paid: true,
+    paid_at: nowIso,
+    paid_session_id: sessionId,
+  })
+  .eq('code', code)
+  .or(`paid_session_id.is.null,paid_session_id.eq.${sessionId}`)
 
-    if (upErr) throw new Error(upErr.message)
+if (upErr) throw new Error(upErr.message)
 
-    // If update didn’t happen, it was already finalized by a previous call
-    const alreadyFinalized = !updated || (updated.paid_session_id && updated.paid_session_id !== sessionId)
-    const shouldSendEmail = !alreadyFinalized && updated?.paid_session_id === sessionId
-
-    // Buyer email from Stripe
-    const buyerEmail =
-      ((session as any)?.customer_details?.email ?? (session as any)?.customer_email ?? '').trim()
-
-    // Amount info (optional)
-    const amountCents = typeof (session as any).amount_total === 'number' ? (session as any).amount_total : null
-    const currencyRaw = typeof (session as any).currency === 'string' ? (session as any).currency : 'usd'
-    const currency = currencyRaw.toUpperCase()
-    const amountLabel = amountCents != null ? `${(amountCents / 100).toFixed(2)} ${currency}` : null
-
-    // ✅ Send exactly ONE email (best-effort)
-    if (shouldSendEmail) {
-      try {
-        console.log('Checkout email:', (session as any)?.customer_details?.email, (session as any)?.customer_email)
-
-        if (buyerEmail) {
-          const resend = getResend()
-          const from = getEmailFrom()
-
-          const origin =
-            req.headers.get('origin') ||
-            process.env.NEXT_PUBLIC_SITE_URL ||
-            'http://localhost:3000'
-
-          const downloadUrl = `${origin}/dl/${encodeURIComponent(code)}`
-
-          await resend.emails.send({
-            from,
-            to: buyerEmail,
-            subject: 'Your FilePay link is ready',
-            html: `
-              <div style="font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; line-height: 1.5;">
-                <h2 style="margin:0 0 8px;">Payment confirmed ✅</h2>
-                <p style="margin:0 0 12px;">
-                  ${amountLabel ? `Amount paid: <b>${amountLabel}</b><br/>` : ''}
-                  Your download link is ready:
-                </p>
-                <p style="margin:0 0 16px;">
-                  <a href="${downloadUrl}" style="display:inline-block; padding:10px 14px; border-radius:10px; background:#111827; color:#fff; text-decoration:none;">
-                    Download file
-                  </a>
-                </p>
-                <p style="margin:0; color:#6b7280; font-size:12px;">
-                  Link code: <b>${code}</b>
-                </p>
-              </div>
-            `,
-          })
-        } else {
-          console.warn('No buyer email found on Stripe session; email not sent.')
-        }
-      } catch (e) {
-        console.error('Resend send failed (non-fatal):', e)
-      }
-    }
 
     return NextResponse.json({ ok: true, paid: true, code }, { status: 200 })
   } catch (err: any) {
