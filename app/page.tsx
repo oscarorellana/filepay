@@ -660,9 +660,16 @@ useEffect(() => {
           </aside>
         </div>
 
-        <footer style={{ ...styles.footer, textAlign: isMobile ? 'left' : 'center' }}>
-          Local MVP · Selected duration: <b>{formatDays(days)}</b>
-        </footer>
+        <footer
+  style={{
+    ...styles.footer,
+    textAlign: isMobile ? 'left' : 'center',
+    opacity: 0.8,
+    fontSize: 14,
+  }}
+>
+  Secure download · Expires in <b>{formatDays(days)}</b>
+</footer>
       </div>
     </main>
   )
