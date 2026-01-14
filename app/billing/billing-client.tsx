@@ -264,28 +264,34 @@ export default function BillingPage() {
               </p>
 
               {/* ✅ FIX hydration: no <div> inside <p> */}
-              <div style={{ ...styles.p, opacity: 0.7 }}>
-                {email ? (
-                  <>
-                    <div>
-                      Signed in as <b>{email}</b>
-                    </div>
-                    {userId ? (
-                      <div style={{ ...styles.p, opacity: 0.7 }}>
-    {email ? (
+              {/* Signed-in header */}
+          <div style={{ ...styles.p, opacity: 0.8, display: 'flex', alignItems: 'center', gap: 8 }}>
+            {email ? (
+  <>
     <span>
       Signed in as <b>{email}</b>
     </span>
+
+    {sub?.plan === 'pro' && (
+        <span
+          style={{
+            fontSize: 11,
+            padding: '2px 8px',
+            borderRadius: 999,
+            background: '#111',
+            color: '#fff',
+            fontWeight: 600,
+            letterSpacing: 0.3,
+          }}
+        >
+          PRO
+        </span>
+      )}
+    </>
   ) : (
-    'Not signed in'
+    <span>Not signed in</span>
   )}
 </div>
-                    ) : null}
-                  </>
-                ) : (
-                  'Not signed in'
-                )}
-              </div>
 
               <div
                 style={{
