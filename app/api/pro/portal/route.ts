@@ -1,38 +1,51 @@
-// app/api/pro/portal/route.ts
 import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
 export const dynamic = 'force-dynamic'
 
-function mustEnv(name: string) {
-  const v = (process.env[name] ?? '').trim()
-  if (!v) throw new Error(`Missing ${name}`)
-  return v
-}
-
 function getStripe() {
-  const key = mustEnv('STRIPE_SECRET_KEY')
+  const key = (process.env.STRIPE_SECRET_KEY ?? '').trim()
+  if (!key) throw new Error('Missing STRIPE_SECRET_KEY')
   return new Stripe(key, { apiVersion: '2025-12-15.clover' })
 }
 
-function getOrigin(req: Request) {
-  return (
-    req.headers.get('origin') ||
-    (process.env.NEXT_PUBLIC_SITE_URL ?? '').trim() ||
-    'http://localhost:3000'
-  )
+function getSupabaseAdmin() {
+  const url = (process.env.SUPABASE_URL ?? '').trim()
+  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim()
+  if (!url) throw new Error('Missing SUPABASE_URL')
+  if (!key) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY')
+  return createClient(url, key, { auth: { persistSession: false } })
 }
 
-const supabaseAdmin = createClient(
-  mustEnv('SUPABASE_URL'),
-  mustEnv('SUPABASE_SERVICE_ROLE_KEY'),
-  { auth: { persistSession: false } }
-)
+function getOrigin(req: Request) {
+  const env = (process.env.NEXT_PUBLIC_SITE_URL ?? '').trim()
+  if (env) return env.replace(/\/+$/, '')
+  const hdr = (req.headers.get('origin') ?? '').trim()
+  if (hdr) return hdr.replace(/\/+$/, '')
+  return 'http://localhost:3000'
+}
+
+function isStripeNoSuchCustomer(err: unknown) {
+  if (!err || typeof err !== 'object') return false
+  const msg = 'message' in err ? String((err as { message?: unknown }).message ?? '') : ''
+  const code = 'code' in err ? String((err as { code?: unknown }).code ?? '') : ''
+  return code === 'resource_missing' || msg.toLowerCase().includes('no such customer')
+}
+
+type SubRow = {
+  plan: string | null
+  status: string | null
+  stripe_customer_id: string | null
+}
 
 export async function POST(req: Request) {
   try {
-    const authHeader = req.headers.get('authorization') || ''
+    const supabaseAdmin = getSupabaseAdmin()
+    const stripe = getStripe()
+
+    // 1) Auth token
+    const authHeader = req.headers.get('authorization') ?? ''
     const token = authHeader.startsWith('Bearer ')
       ? authHeader.slice('Bearer '.length).trim()
       : ''
@@ -41,18 +54,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing auth token' }, { status: 401 })
     }
 
+    // 2) Get user from token
     const { data: userRes, error: userErr } = await supabaseAdmin.auth.getUser(token)
     if (userErr || !userRes?.user) {
       return NextResponse.json({ error: 'Invalid session' }, { status: 401 })
     }
 
-    const userId = userRes.user.id
-    const origin = getOrigin(req)
+    const user = userRes.user
+    const userId = user.id
+    const email = (user.email ?? '').trim()
 
-    // Look up Stripe customer for this user (if any)
-    const { data: row, error: subErr } = await supabaseAdmin
+    // 3) Load subscription row
+    const { data: subRow, error: subErr } = await supabaseAdmin
       .from('subscriptions')
-      .select('stripe_customer_id')
+      .select('plan,status,stripe_customer_id')
       .eq('user_id', userId)
       .maybeSingle()
 
@@ -60,55 +75,74 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: subErr.message }, { status: 500 })
     }
 
-    const customerId = (row?.stripe_customer_id ?? '').trim()
+    const sub = (subRow ?? null) as SubRow | null
+    const isPro = sub?.plan === 'pro' && sub?.status === 'active'
 
-    // ✅ If no customer yet => send user to Pricing (Upgrade)
+    // ✅ Si NO es pro, no abras portal: manda a “Upgrade”
+    if (!isPro) {
+      return NextResponse.json(
+        { error: 'Not Pro. Upgrade required.' },
+        { status: 403 }
+      )
+    }
+
+    // 4) Ensure we have a valid Stripe customer
+    let customerId = (sub?.stripe_customer_id ?? '').trim()
+
+    async function createAndPersistCustomer() {
+      // create customer in Stripe
+      const customer = await stripe.customers.create({
+        email: email || undefined,
+        metadata: { user_id: userId },
+      })
+
+      // persist to DB
+      const { error: upErr } = await supabaseAdmin
+        .from('subscriptions')
+        .upsert(
+          {
+            user_id: userId,
+            stripe_customer_id: customer.id,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id' }
+        )
+
+      if (upErr) throw new Error(upErr.message)
+      return customer.id
+    }
+
     if (!customerId) {
-      return NextResponse.json({
-        url: `${origin}/pricing`,
-        reason: 'no_customer',
-      })
-    }
-
-    const stripe = getStripe()
-
-    const portalConfigId = (process.env.STRIPE_BILLING_PORTAL_CONFIG_ID ?? '').trim()
-
-    try {
-      const portal = await stripe.billingPortal.sessions.create({
-        customer: customerId,
-        return_url: `${origin}/billing`,
-        ...(portalConfigId ? { configuration: portalConfigId } : {}),
-      })
-
-      return NextResponse.json({ url: portal.url })
-    } catch (e: any) {
-      // ✅ If Stripe says customer doesn't exist, clean it and send to Pricing
-      const msg = (e?.message ?? '').toLowerCase()
-      if (msg.includes('no such customer')) {
-        const { error: cleanupErr } = await supabaseAdmin
-  .from('subscriptions')
-  .update({ stripe_customer_id: null })
-  .eq('user_id', userId)
-  .eq('stripe_customer_id', customerId)
-
-if (cleanupErr) {
-  console.warn('Failed to cleanup invalid stripe_customer_id:', cleanupErr.message)
-}
-
-        return NextResponse.json({
-          url: `${origin}/pricing`,
-          reason: 'customer_not_found',
-        })
+      customerId = await createAndPersistCustomer()
+    } else {
+      // Verify customer exists (handles stale cus_ ids)
+      try {
+        await stripe.customers.retrieve(customerId)
+      } catch (err: unknown) {
+        if (isStripeNoSuchCustomer(err)) {
+          customerId = await createAndPersistCustomer()
+        } else {
+          throw err
+        }
       }
-
-      throw e
     }
-  } catch (err: any) {
-    console.error('portal error:', err)
-    return NextResponse.json(
-      { error: err?.message ?? 'Server error' },
-      { status: 500 }
-    )
+
+    // 5) Create billing portal session
+    const origin = getOrigin(req)
+    const portal = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: `${origin}/billing`,
+      configuration: process.env.STRIPE_BILLING_PORTAL_CONFIG_ID || undefined,
+    })
+
+    return NextResponse.json({ url: portal.url }, { status: 200 })
+  } catch (err: unknown) {
+    const msg =
+      err && typeof err === 'object' && 'message' in err
+        ? String((err as { message?: unknown }).message ?? 'Server error')
+        : 'Server error'
+
+    console.error('pro/portal error:', err)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
