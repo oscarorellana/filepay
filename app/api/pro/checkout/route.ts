@@ -6,48 +6,51 @@ export const dynamic = 'force-dynamic'
 
 function getStripe() {
   const key = (process.env.STRIPE_SECRET_KEY ?? '').trim()
-  if (!key) throw new Error('Missing STRIPE_SECRET_KEY env var')
+  if (!key) throw new Error('Missing STRIPE_SECRET_KEY')
   return new Stripe(key, { apiVersion: '2025-12-15.clover' })
 }
 
 function getSupabaseAdmin() {
   const url = (process.env.SUPABASE_URL ?? '').trim()
   const key = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim()
-  if (!url) throw new Error('Missing SUPABASE_URL env var')
-  if (!key) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY env var')
+  if (!url) throw new Error('Missing SUPABASE_URL')
+  if (!key) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY')
   return createClient(url, key, { auth: { persistSession: false } })
 }
 
 function getOrigin(req: Request) {
-  return (
-    req.headers.get('origin') ||
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    'http://localhost:3000'
-  )
+  const env = (process.env.NEXT_PUBLIC_SITE_URL ?? '').trim()
+  if (env) return env.replace(/\/+$/, '')
+  const hdr = (req.headers.get('origin') ?? '').trim()
+  if (hdr) return hdr.replace(/\/+$/, '')
+  return 'http://localhost:3000'
 }
 
-/**
- * POST /api/pro/checkout
- * Requires Authorization: Bearer <supabase_access_token>
- *
- * Creates a Stripe Checkout Session (subscription)
- * Reuses stripe_customer_id when present and blocks duplicates.
- */
+function isStripeNoSuchCustomer(err: unknown) {
+  if (!err || typeof err !== 'object') return false
+  const msg = 'message' in err ? String((err as { message?: unknown }).message ?? '') : ''
+  const code = 'code' in err ? String((err as { code?: unknown }).code ?? '') : ''
+  return code === 'resource_missing' || msg.toLowerCase().includes('no such customer')
+}
+
+type SubRow = {
+  plan: string | null
+  status: string | null
+  stripe_customer_id: string | null
+}
+
 export async function POST(req: Request) {
   try {
-    const stripe = getStripe()
     const supabaseAdmin = getSupabaseAdmin()
+    const stripe = getStripe()
 
     const priceId = (process.env.STRIPE_PRO_PRICE_ID ?? '').trim()
     if (!priceId) {
-      return NextResponse.json(
-        { error: 'Missing STRIPE_PRO_PRICE_ID env var' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: 'Missing STRIPE_PRO_PRICE_ID' }, { status: 500 })
     }
 
     // 1) Auth
-    const authHeader = req.headers.get('authorization') || ''
+    const authHeader = req.headers.get('authorization') ?? ''
     const token = authHeader.startsWith('Bearer ')
       ? authHeader.slice('Bearer '.length).trim()
       : ''
@@ -56,96 +59,101 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing auth token' }, { status: 401 })
     }
 
+    // 2) User
     const { data: userRes, error: userErr } = await supabaseAdmin.auth.getUser(token)
     if (userErr || !userRes?.user) {
-      return NextResponse.json({ error: 'Invalid auth token' }, { status: 401 })
+      return NextResponse.json({ error: 'Invalid session' }, { status: 401 })
     }
 
     const user = userRes.user
     const userId = user.id
     const email = (user.email ?? '').trim()
 
-    const origin = getOrigin(req)
-    const successUrl = `${origin}/success?session_id={CHECKOUT_SESSION_ID}`
-    const cancelUrl = `${origin}/pricing`
-
-    // 2) Read current subscription row (to reuse customer)
-    const { data: row, error: rowErr } = await supabaseAdmin
+    // 3) Read subscription row (maybe has stale customer)
+    const { data: subRow, error: subErr } = await supabaseAdmin
       .from('subscriptions')
-      .select('stripe_customer_id')
+      .select('plan,status,stripe_customer_id')
       .eq('user_id', userId)
       .maybeSingle()
 
-    if (rowErr) throw new Error(rowErr.message)
+    if (subErr) return NextResponse.json({ error: subErr.message }, { status: 500 })
 
-    const customerId = (row?.stripe_customer_id ?? '').trim() || null
+    const sub = (subRow ?? null) as SubRow | null
+    const isAlreadyPro = sub?.plan === 'pro' && sub?.status === 'active'
+    if (isAlreadyPro) {
+      // Already pro => send them to billing
+      return NextResponse.json({ url: `${getOrigin(req)}/billing` }, { status: 200 })
+    }
 
-    // 3) If we already have a customer, block duplicate active/trialing subs
-    if (customerId) {
-      const existing = await stripe.subscriptions.list({
-        customer: customerId,
-        status: 'all',
-        limit: 25,
+    // 4) Ensure Stripe customer exists (auto-repair)
+    let customerId = (sub?.stripe_customer_id ?? '').trim()
+
+    async function createAndPersistCustomer() {
+      const customer = await stripe.customers.create({
+        email: email || undefined,
+        metadata: { user_id: userId },
       })
 
-      const hasActiveLike = existing.data.some((s) =>
-        ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status)
-      )
-
-      if (hasActiveLike) {
-        // Instead of creating a new subscription, send them to the portal
-        const portal = await stripe.billingPortal.sessions.create({
-          customer: customerId,
-          return_url: `${origin}/billing`,
-        })
-
-        return NextResponse.json(
+      const { error: upErr } = await supabaseAdmin
+        .from('subscriptions')
+        .upsert(
           {
-            error: 'You already have an active Pro subscription.',
-            portal_url: portal.url,
-            already_pro: true,
+            user_id: userId,
+            stripe_customer_id: customer.id,
+            updated_at: new Date().toISOString(),
           },
-          { status: 409 }
+          { onConflict: 'user_id' }
         )
+
+      if (upErr) throw new Error(upErr.message)
+      return customer.id
+    }
+
+    if (!customerId) {
+      customerId = await createAndPersistCustomer()
+    } else {
+      try {
+        await stripe.customers.retrieve(customerId)
+      } catch (err: unknown) {
+        if (isStripeNoSuchCustomer(err)) {
+          customerId = await createAndPersistCustomer()
+        } else {
+          throw err
+        }
       }
     }
 
-    // 4) Create Checkout Session (subscription)
+    // 5) Create Checkout Session (subscription)
+    const origin = getOrigin(req)
+
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
+      customer: customerId,
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-
-      // ✅ IMPORTANT: reuse the same Stripe customer if we have one
-      ...(customerId
-        ? { customer: customerId }
-        : email
-          ? { customer_email: email }
-          : {}),
-
-      // Useful for debugging / mapping
-      client_reference_id: userId,
+      success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/pricing`,
+      // important for webhook
       metadata: {
-        user_id: userId,
         kind: 'pro',
+        user_id: userId,
       },
-
-      // Also attach metadata to the subscription itself
-      subscription_data: {
-        metadata: {
-          user_id: userId,
-          kind: 'pro',
-        },
-      },
+      // optional
+      client_reference_id: userId,
+      allow_promotion_codes: true,
     })
 
+    if (!session.url) {
+      return NextResponse.json({ error: 'No checkout URL returned' }, { status: 500 })
+    }
+
     return NextResponse.json({ url: session.url }, { status: 200 })
-  } catch (err: any) {
-    console.error('pro checkout error:', err)
-    return NextResponse.json(
-      { error: err?.message ?? 'Server error' },
-      { status: 500 }
-    )
+  } catch (err: unknown) {
+    const msg =
+      err && typeof err === 'object' && 'message' in err
+        ? String((err as { message?: unknown }).message ?? 'Server error')
+        : 'Server error'
+
+    console.error('pro/checkout error:', err)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
