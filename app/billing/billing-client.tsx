@@ -271,12 +271,15 @@ export default function BillingPage() {
                       Signed in as <b>{email}</b>
                     </div>
                     {userId ? (
-                      <div style={{ marginTop: 6 }}>
-                        User ID:{' '}
-                        <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
-                          {userId}
-                        </span>
-                      </div>
+                      <div style={{ ...styles.p, opacity: 0.7 }}>
+    {email ? (
+    <span>
+      Signed in as <b>{email}</b>
+    </span>
+  ) : (
+    'Not signed in'
+  )}
+</div>
                     ) : null}
                   </>
                 ) : (
@@ -429,14 +432,29 @@ export default function BillingPage() {
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={openPortal}
-                style={{ ...styles.primaryBtn, opacity: busy ? 0.75 : 1 }}
-                disabled={busy}
-              >
-                {busy ? 'Opening…' : 'Manage subscription'}
-              </button>
+              {/* PRIMARY ACTION */}
+{isSignedIn && isPro ? (
+  <button
+    type="button"
+    onClick={openPortal}
+    style={{ ...styles.primaryBtn, opacity: busy ? 0.75 : 1 }}
+    disabled={busy}
+  >
+    {busy ? 'Opening…' : 'Manage subscription'}
+  </button>
+) : (
+  <a
+    href="/pricing"
+    style={{
+      ...styles.primaryBtn,
+      display: 'inline-block',
+      textAlign: 'center',
+      textDecoration: 'none',
+    }}
+  >
+    Upgrade to Pro
+  </a>
+)}
 
               <div style={styles.secondaryRow}>
                 <button

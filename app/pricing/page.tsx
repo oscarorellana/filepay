@@ -352,7 +352,7 @@ export default function PricingPage() {
           </div>
         </section>
 
-        <div style={styles.footer}>Tip: Add this page to your main nav once you’re ready to launch publicly.</div>
+  
       </div>
     </main>
   )
