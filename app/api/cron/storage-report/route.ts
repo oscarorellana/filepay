@@ -62,7 +62,10 @@ export async function GET(req: Request) {
 
     if (activeErr) throw new Error(activeErr.message)
 
-    const totalBytes = (activeRows ?? []).reduce((acc, r) => acc + (Number(r.file_bytes) || 0), 0)
+    const totalBytes = (activeRows ?? []).reduce((acc, r: any) => {
+  const v = typeof r.file_bytes === 'string' ? parseInt(r.file_bytes, 10) : Number(r.file_bytes)
+  return acc + (Number.isFinite(v) ? v : 0)
+}, 0)
 
     // 2) Expirados que aún no están marcados como borrados (o storage_deleted false)
     const { data: expiredRows, error: expErr } = await supabaseAdmin
@@ -76,7 +79,14 @@ export async function GET(req: Request) {
     if (expErr) throw new Error(expErr.message)
 
     const expiredCount = expiredRows?.length ?? 0
-    const expiredBytes = (expiredRows ?? []).reduce((acc, r) => acc + (Number(r.file_bytes) || 0), 0)
+    const expiredBytes = (expiredRows ?? []).reduce((acc, r: any) => {
+    const v =
+    typeof r.file_bytes === 'string'
+      ? parseInt(r.file_bytes, 10)
+      : Number(r.file_bytes)
+
+  return acc + (Number.isFinite(v) ? v : 0)
+}, 0)
 
     const lines = (expiredRows ?? []).map((r) => {
       const b = Number(r.file_bytes) || 0
