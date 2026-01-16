@@ -4,7 +4,9 @@ import { supabaseAdmin } from '../../../lib/supabase-admin'
 function makeCode(length = 8) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // evita 0/O/1/I
   let out = ''
-  for (let i = 0; i < length; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)]
+  for (let i = 0; i < length; i++) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)]
+  }
   return out
 }
 
@@ -14,6 +16,12 @@ export async function POST(req: Request) {
 
     const file_path = body?.file_path as string | undefined
     const daysRaw = body?.days
+
+    // 👇 NUEVO: tamaño del archivo (bytes)
+    const file_bytes =
+      typeof body?.file_bytes === 'number' && body.file_bytes > 0
+        ? body.file_bytes
+        : null
 
     // opcional (si lo mandas desde el frontend)
     const created_by_user_id = (body?.created_by_user_id as string | undefined) ?? null
@@ -26,7 +34,9 @@ export async function POST(req: Request) {
     const daysNum = Number(daysRaw ?? 14)
     const safeDays = [1, 3, 7, 14, 30].includes(daysNum) ? daysNum : 14
 
-    const expires_at = new Date(Date.now() + safeDays * 24 * 60 * 60 * 1000).toISOString()
+    const expires_at = new Date(
+      Date.now() + safeDays * 24 * 60 * 60 * 1000
+    ).toISOString()
 
     // Generar code único (hasta 10 intentos)
     let code = makeCode(8)
@@ -41,16 +51,15 @@ export async function POST(req: Request) {
       code = makeCode(8)
     }
 
-    // Insert SOLO con columnas que ya sabemos que existen
-    const insertPayload: Record<string, any> = {
+    // Payload SOLO con columnas existentes
+    const insertPayload: Record<string, unknown> = {
       code,
       file_path,
       paid: false,
       expires_at,
+      file_bytes, // ✅ NUEVO
     }
 
-    // Si tu tabla SÍ tiene created_by_user_id, esto ayuda.
-    // Si no la tiene, te dará error: en ese caso dime y lo quitamos.
     if (created_by_user_id) {
       insertPayload.created_by_user_id = created_by_user_id
     }
@@ -65,13 +74,18 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json(
-      { code, expires_at, days: safeDays },
+      {
+        code,
+        expires_at,
+        days: safeDays,
+        file_bytes,
+      },
       { status: 200 }
     )
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('create-link error:', err)
     return NextResponse.json(
-      { error: err?.message ?? 'Unknown error' },
+      { error: err instanceof Error ? err.message : 'Unknown error' },
       { status: 500 }
     )
   }
