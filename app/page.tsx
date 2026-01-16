@@ -303,7 +303,7 @@ useEffect(() => {
     return path
   }
 
-  async function createLink(filePath: string) {
+  async function createLink(filePath: string, file: File) {
     const res = await fetch('/api/create-link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -311,6 +311,7 @@ useEffect(() => {
         file_path: filePath,
         days,
         created_by_user_id: userId,
+        file_bytes: file.size,
       }),
     })
 
@@ -348,7 +349,7 @@ useEffect(() => {
       const path = await uploadToSupabase(file)
 
       setStatus('Creating link…')
-      const { code } = await createLink(path)
+      const { code } = await createLink(path, file)
 
       setStatus(isPro ? 'Finalizing…' : 'Redirecting to payment…')
       await goPayOrProBypass(code)
