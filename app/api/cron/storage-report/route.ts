@@ -11,9 +11,18 @@ const supabaseAdmin = createClient(
 )
 
 function requireCronSecret(req: Request) {
-  const got = (req.headers.get('x-cron-secret') || '').trim()
   const expected = (process.env.CRON_SECRET || '').trim()
-  return Boolean(expected) && got === expected
+  if (!expected) return false
+
+  // Vercel Cron: Authorization: Bearer <secret>
+  const auth = (req.headers.get('authorization') || '').trim()
+  if (auth === `Bearer ${expected}`) return true
+
+  // Manual/legacy: x-cron-secret: <secret>
+  const legacy = (req.headers.get('x-cron-secret') || '').trim()
+  if (legacy === expected) return true
+
+  return false
 }
 
 function bytesToHuman(n: number) {
