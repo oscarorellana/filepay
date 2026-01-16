@@ -9,7 +9,7 @@ type CreateLinkBody = {
 }
 
 function makeCode(length = 8): string {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // evita 0/O/1/I
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   let out = ''
   for (let i = 0; i < length; i++) {
     out += alphabet[Math.floor(Math.random() * alphabet.length)]
@@ -38,7 +38,8 @@ export async function POST(req: Request) {
     const daysNum = parsePositiveInt(body.days) ?? 14
     const safeDays = [1, 3, 7, 14, 30].includes(daysNum) ? daysNum : 14
 
-    const file_bytes = parsePositiveInt(body.file_bytes) // null si no viene o es invalido
+    // ✅ bytes (BIGINT en DB)
+    const file_bytes = parsePositiveInt(body.file_bytes)
 
     const created_by_user_id =
       typeof body.created_by_user_id === 'string' && body.created_by_user_id.trim()
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
 
     const expires_at = new Date(Date.now() + safeDays * 24 * 60 * 60 * 1000).toISOString()
 
-    // Generar code único (hasta 10 intentos)
+    // code único
     let code = makeCode(8)
     for (let i = 0; i < 10; i++) {
       const { data, error } = await supabaseAdmin
@@ -65,18 +66,17 @@ export async function POST(req: Request) {
       code = makeCode(8)
     }
 
-    // Payload SOLO con columnas que existen (asegúrate que file_bytes exista en DB)
+    // ✅ payload
     const insertPayload: Record<string, unknown> = {
       code,
       file_path,
       paid: false,
       expires_at,
-      file_bytes, // ✅ guarda bytes (o null)
     }
 
-    if (created_by_user_id) {
-      insertPayload.created_by_user_id = created_by_user_id
-    }
+    // ✅ solo setear si viene válido
+    if (file_bytes != null) insertPayload.file_bytes = file_bytes
+    if (created_by_user_id) insertPayload.created_by_user_id = created_by_user_id
 
     const { error: insErr } = await supabaseAdmin.from('file_links').insert(insertPayload)
 
@@ -85,10 +85,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: insErr.message }, { status: 500 })
     }
 
-    return NextResponse.json(
-      { code, expires_at, days: safeDays, file_bytes },
-      { status: 200 }
-    )
+    return NextResponse.json({ code, expires_at, days: safeDays, file_bytes }, { status: 200 })
   } catch (err: unknown) {
     console.error('create-link error:', err)
     return NextResponse.json(
