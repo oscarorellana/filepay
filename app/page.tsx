@@ -303,22 +303,22 @@ useEffect(() => {
     return path
   }
 
-  async function createLink(filePath: string, file: File) {
-    const res = await fetch('/api/create-link', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        file_path: filePath,
-        days,
-        created_by_user_id: userId,
-        file_bytes: file.size,
-      }),
-    })
+async function createLink(filePath: string, fileBytes: number | null) {
+  const res = await fetch('/api/create-link', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      file_path: filePath,
+      file_bytes: fileBytes,
+      days,
+      created_by_user_id: userId,
+    }),
+  })
 
-    const json = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(json?.error || 'Failed to create link')
-    return json as { code: string; expires_at?: string; days?: number }
-  }
+  const json = (await res.json()) as any
+  if (!res.ok) throw new Error(json?.error || 'Failed to create link')
+  return json as { code: string; expires_at: string; days: number; file_bytes: number | null }
+}
 
   async function goPayOrProBypass(code: string) {
     if (isPro) {
@@ -349,7 +349,8 @@ useEffect(() => {
       const path = await uploadToSupabase(file)
 
       setStatus('Creating link…')
-      const { code } = await createLink(path, file)
+      const meta = await createLink(path, file?.size ?? null)
+      const code = meta.code
 
       setStatus(isPro ? 'Finalizing…' : 'Redirecting to payment…')
       await goPayOrProBypass(code)
