@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { Resend } from 'resend'
+import { signAdminAction } from '@/lib/admin-action'
 
 export const dynamic = 'force-dynamic'
+
+
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL!,
@@ -93,27 +96,43 @@ export async function GET(req: Request) {
       return `${r.code} · exp ${r.expires_at} · ${bytesToHuman(b)} · paid=${String(r.paid)}`
     })
 
-    const html = `
-      <div style="font-family:system-ui;line-height:1.5">
-        <h2 style="margin:0 0 10px;">FilePay daily storage report</h2>
+    const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || '').trim()
+    if (!siteUrl) {
+    return NextResponse.json({ error: 'Missing NEXT_PUBLIC_SITE_URL' }, { status: 500 })
+                  }
+    const token = signAdminAction('purge_expired', 60 * 60) // 1 hora
+    const adminLink = `${siteUrl}/admin/cleanup-expired?token=${encodeURIComponent(token)}`
 
-        <p style="margin:0 0 10px;"><b>Estimated active storage:</b> ${bytesToHuman(totalBytes)}</p>
-        <p style="margin:0 0 14px;"><b>Expired pending delete:</b> ${expiredCount} links (${bytesToHuman(expiredBytes)})</p>
+const html = `
+  <div style="font-family:system-ui;line-height:1.5">
+    <h2 style="margin:0 0 10px;">FilePay daily storage report</h2>
 
-        ${
-          expiredCount
-            ? `<div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px">
-                 <div style="font-weight:700;margin-bottom:8px">Top expired (max 30)</div>
-                 <pre style="margin:0;white-space:pre-wrap;font-size:12px">${lines.join('\n')}</pre>
-               </div>`
-            : `<p style="margin:0;">No expired links pending delete ✅</p>`
-        }
+    <p style="margin:0 0 10px;"><b>Estimated active storage:</b> ${bytesToHuman(totalBytes)}</p>
+    <p style="margin:0 0 14px;"><b>Expired pending delete:</b> ${expiredCount} links (${bytesToHuman(expiredBytes)})</p>
 
-        <p style="margin:14px 0 0;font-size:12px;color:#6b7280">
-          Note: totals are based on file_bytes stored at upload time.
-        </p>
+    <div style="margin:14px 0 18px;">
+      <a href="${adminLink}"
+         style="display:inline-block;padding:10px 14px;border-radius:10px;
+                background:#111827;color:white;text-decoration:none;font-weight:700">
+        Review & delete all expired (secure)
+      </a>
+      <div style="font-size:12px;color:#6b7280;margin-top:6px">
+        Link expires in 1 hour.
       </div>
-    `
+    </div>
+
+    ${expiredCount ? `
+      <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px">
+        <div style="font-weight:700;margin-bottom:8px">Top expired (max 30)</div>
+        <pre style="margin:0;white-space:pre-wrap;font-size:12px">${lines.join('\n')}</pre>
+      </div>
+    ` : `<p style="margin:0;">No expired links pending delete ✅</p>`}
+
+    <p style="margin:14px 0 0;font-size:12px;color:#6b7280">
+      Note: totals are based on file_bytes stored at upload time.
+    </p>
+  </div>
+`
 
     await resend.emails.send({
       from: emailFrom,
