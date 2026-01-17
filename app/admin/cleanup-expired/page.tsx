@@ -1,16 +1,62 @@
-// app/admin/cleanup-expired/page.tsx
-import { redirect } from 'next/navigation'
-import { verifyAdminActionToken } from '@/lib/admin-action'
+'use client'
 
-export default async function Page({
-  searchParams,
-}: {
-  searchParams: { token?: string; limit?: string }
-}) {
+import { useMemo, useState } from 'react'
+
+export default function Page({ searchParams }: { searchParams: { token?: string } }) {
   const token = (searchParams.token || '').trim()
-  const ok = token && verifyAdminActionToken(token)
 
-  if (!ok) {
+  const [confirm, setConfirm] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string>('')
+
+  const apiUrl = useMemo(() => {
+    const qs = new URLSearchParams()
+    qs.set('token', token)
+    qs.set('include_not_marked', '1') // ✅ borra expirados aunque deleted_at sea null
+    qs.set('limit', '200')
+    return `/api/admin/cleanup-expired?${qs.toString()}`
+  }, [token])
+
+  async function runCleanup() {
+    if (!token) {
+      setMsg('Unauthorized: missing token.')
+      return
+    }
+    if (!confirm) {
+      setMsg('Please confirm first.')
+      return
+    }
+
+    setBusy(true)
+    setMsg('Running cleanup…')
+
+    try {
+      const res = await fetch(apiUrl, { method: 'POST' })
+      const json = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setMsg(json?.error || 'Cleanup failed.')
+        setBusy(false)
+        return
+      }
+
+      // manda a /admin/cleanup-expired/done con stats
+      const done = new URLSearchParams()
+      done.set('via', json.via ?? '')
+      done.set('mode', json.mode ?? '')
+      done.set('found', String(json.found ?? 0))
+      done.set('bytes', String(json.totalBytesFound ?? 0))
+      done.set('storage', String(json.deletedFromStorage ?? 0))
+      done.set('hard', String(json.deletedRows ?? 0))
+      done.set('failed', String(json.failed ?? 0))
+      window.location.href = `/admin/cleanup-expired/done?${done.toString()}`
+    } catch (e: any) {
+      setMsg(e?.message || 'Cleanup error.')
+      setBusy(false)
+    }
+  }
+
+  if (!token) {
     return (
       <main style={{ padding: 24, fontFamily: 'system-ui' }}>
         <h1>Unauthorized</h1>
@@ -19,64 +65,52 @@ export default async function Page({
     )
   }
 
-  async function doCleanup() {
-    'use server'
-
-    // puedes ajustar limit si quieres (default del route es 200)
-    const limit = (searchParams.limit || '').trim()
-    const qs = new URLSearchParams()
-    qs.set('token', token)
-    if (limit) qs.set('limit', limit)
-
-    // Importante: el route acepta token por query
-    const res = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/admin/cleanup-expired?${qs}`, {
-      method: 'POST',
-      cache: 'no-store',
-    })
-
-    const json = (await res.json().catch(() => ({}))) as any
-
-    if (!res.ok) {
-      const msg = json?.error || 'Cleanup failed'
-      redirect(`/admin/cleanup-expired/done?soft=0&storage=0&hard=0&error=${encodeURIComponent(msg)}`)
-    }
-
-    // Tu route devuelve: deletedFromStorage, deletedRows, etc.
-    const storage = String(json?.deletedFromStorage ?? 0)
-    const hard = String(json?.deletedRows ?? 0)
-
-    // “soft” aquí realmente no aplica porque este endpoint hace hard delete;
-    // lo dejo en 0 para que no confunda
-    redirect(`/admin/cleanup-expired/done?soft=0&storage=${storage}&hard=${hard}`)
-  }
-
   return (
     <main style={{ padding: 24, fontFamily: 'system-ui', maxWidth: 720 }}>
       <h1>Delete expired files</h1>
+
       <p>
-        This will permanently delete <b>expired files</b> from storage and remove their DB rows.
+        This will permanently delete <b>all expired files</b> from Supabase Storage and remove their rows from the DB.
       </p>
 
-      <form action={doCleanup}>
+      <div style={{ marginTop: 16, padding: 12, border: '1px solid #e5e7eb', borderRadius: 12 }}>
+        <label style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={confirm}
+            onChange={(e) => setConfirm(e.target.checked)}
+            disabled={busy}
+          />
+          <span style={{ fontWeight: 700 }}>
+            Yes — I understand this is permanent and will delete expired files now.
+          </span>
+        </label>
+
         <button
-          type="submit"
+          type="button"
+          onClick={runCleanup}
+          disabled={!confirm || busy}
           style={{
+            marginTop: 12,
             padding: '10px 14px',
             borderRadius: 10,
             border: '1px solid #111827',
             background: '#111827',
             color: 'white',
             fontWeight: 800,
-            cursor: 'pointer',
+            cursor: !confirm || busy ? 'not-allowed' : 'pointer',
+            opacity: !confirm || busy ? 0.6 : 1,
           }}
         >
-          Delete all expired now
+          {busy ? 'Deleting…' : 'Delete all expired now'}
         </button>
-      </form>
 
-      <p style={{ marginTop: 12, color: '#6b7280', fontSize: 12 }}>
-        Token expires soon. If it fails, open the latest report email again.
-      </p>
+        {msg && <div style={{ marginTop: 10, fontSize: 13, opacity: 0.85 }}>{msg}</div>}
+
+        <p style={{ marginTop: 10, color: '#6b7280', fontSize: 12 }}>
+          Token expires soon. If it fails, open the latest report email again.
+        </p>
+      </div>
     </main>
   )
 }
