@@ -37,7 +37,7 @@ function safeEqual(a: string, b: string) {
 
 type ActionPayload = {
   action: 'purge_expired'
-  exp: number // unix seconds
+  exp: number
   nonce: string
 }
 
@@ -52,9 +52,7 @@ function verifyActionToken(token: string) {
   const mac = crypto.createHmac('sha256', secret).update(payloadB64).digest()
   const expectedSigB64 = base64urlEncode(mac)
 
-  if (!safeEqual(sigB64, expectedSigB64)) {
-    return { ok: false as const, reason: 'bad_sig' as const }
-  }
+  if (!safeEqual(sigB64, expectedSigB64)) return { ok: false as const, reason: 'bad_sig' as const }
 
   let payload: ActionPayload
   try {
@@ -63,18 +61,11 @@ function verifyActionToken(token: string) {
     return { ok: false as const, reason: 'bad_json' as const }
   }
 
-  if (!payload || payload.action !== 'purge_expired') {
-    return { ok: false as const, reason: 'bad_action' as const }
-  }
+  if (!payload || payload.action !== 'purge_expired') return { ok: false as const, reason: 'bad_action' as const }
 
   const nowSec = Math.floor(Date.now() / 1000)
-  if (!payload.exp || payload.exp <= nowSec) {
-    return { ok: false as const, reason: 'expired' as const }
-  }
-
-  if (!payload.nonce || typeof payload.nonce !== 'string') {
-    return { ok: false as const, reason: 'no_nonce' as const }
-  }
+  if (!payload.exp || payload.exp <= nowSec) return { ok: false as const, reason: 'expired' as const }
+  if (!payload.nonce || typeof payload.nonce !== 'string') return { ok: false as const, reason: 'no_nonce' as const }
 
   return { ok: true as const }
 }
@@ -87,10 +78,8 @@ function requireAdmin(req: Request) {
   const qtoken = getTokenFromQuery(req)
   const token = bearer || x || qtoken
 
-  // 1) ADMIN_PURGE_TOKEN (curl / manual)
   if (expected && token === expected) return { ok: true as const, via: 'purge_token' as const }
 
-  // 2) token firmado (link email)
   const v = token ? verifyActionToken(token) : { ok: false as const, reason: 'missing' as const }
   if (v.ok) return { ok: true as const, via: 'action_token' as const }
 
@@ -101,7 +90,6 @@ function requireAdmin(req: Request) {
   return { ok: false as const, reason: 'bad_token' as const }
 }
 
-// Helpers: parse bigint returned as string
 function toInt(v: unknown): number {
   if (typeof v === 'number') return Number.isFinite(v) ? Math.floor(v) : 0
   if (typeof v === 'bigint') return Number(v)
@@ -126,84 +114,11 @@ function includeNotMarked(req: Request) {
   return url.searchParams.get('include_not_marked') === '1'
 }
 
-async function fetchExpired(req: Request) {
-  const limit = parseLimit(req)
-  const includeAllExpired = includeNotMarked(req)
-  const nowIso = new Date().toISOString()
-
-  let q: any = supabaseAdmin
-    .from('file_links')
-    .select('code,file_path,file_bytes,expires_at,deleted_at,storage_deleted')
-    .lte('expires_at', nowIso)
-    .order('expires_at', { ascending: true })
-    .limit(limit)
-
-  if (!includeAllExpired) {
-    // modo seguro: solo los que ya fueron soft-deleted
-    q = q.not('deleted_at', 'is', null)
-  }
-
-  const { data: rows, error: fetchErr } = await q
-  if (fetchErr) throw new Error(fetchErr.message)
-
-  const items = (rows ?? []) as any[]
-  const totalBytesFound = items.reduce((acc, r) => acc + toInt(r.file_bytes), 0)
-
-  return { items, totalBytesFound, limit, includeAllExpired }
+function isDryRun(req: Request) {
+  const url = new URL(req.url)
+  return url.searchParams.get('dry_run') === '1'
 }
 
-/**
- * GET = PREVIEW (no borra nada)
- * /api/admin/cleanup-expired?token=...&limit=50
- */
-export async function GET(req: Request) {
-  const auth = requireAdmin(req)
-  if (!auth.ok) {
-    const status = auth.reason === 'missing_env' ? 500 : 401
-    return NextResponse.json(
-      {
-        error:
-          auth.reason === 'missing_env'
-            ? 'Missing ADMIN_PURGE_TOKEN and ADMIN_ACTION_SECRET'
-            : 'Unauthorized',
-      },
-      { status }
-    )
-  }
-
-  try {
-    const { items, totalBytesFound, limit, includeAllExpired } = await fetchExpired(req)
-
-    return NextResponse.json(
-      {
-        ok: true,
-        via: auth.via,
-        preview: true,
-        found: items.length,
-        totalBytesFound,
-        mode: includeAllExpired ? 'expired_any' : 'expired_soft_deleted_only',
-        limit,
-        // devuelvo lista para UI (no todo el mundo quiere, pero sirve)
-        items: items.map((r) => ({
-          code: String(r.code || ''),
-          file_path: String(r.file_path || ''),
-          file_bytes: r.file_bytes ?? null,
-          expires_at: r.expires_at ?? null,
-          deleted_at: r.deleted_at ?? null,
-          storage_deleted: Boolean(r.storage_deleted),
-        })),
-      },
-      { status: 200 }
-    )
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
-  }
-}
-
-/**
- * POST = PURGE (borra storage + borra rows)
- * /api/admin/cleanup-expired?token=...&limit=50
- */
 export async function POST(req: Request) {
   const auth = requireAdmin(req)
   if (!auth.ok) {
@@ -219,10 +134,73 @@ export async function POST(req: Request) {
     )
   }
 
+  const limit = parseLimit(req)
+  const includeAllExpired = includeNotMarked(req)
+  const dryRun = isDryRun(req)
+  const nowIso = new Date().toISOString()
+
   try {
-    const { items, totalBytesFound, limit, includeAllExpired } = await fetchExpired(req)
+    // 1) fetch expirados
+    let q: any = supabaseAdmin
+      .from('file_links')
+      .select('code,file_path,file_bytes,expires_at,deleted_at,storage_deleted')
+      .lte('expires_at', nowIso)
+      .order('expires_at', { ascending: true })
+      .limit(limit)
+
+    if (!includeAllExpired) q = q.not('deleted_at', 'is', null)
+
+    const { data: rows, error: fetchErr } = await q
+    if (fetchErr) throw new Error(fetchErr.message)
+
+    const items = (rows ?? []) as any[]
+    const totalBytesFound = items.reduce((acc, r) => acc + toInt(r.file_bytes), 0)
+
+    // Dry-run: no borrar nada
+    if (dryRun) {
+      // log
+      await supabaseAdmin.from('admin_actions').insert({
+        action: 'purge_expired',
+        mode: includeAllExpired ? 'expired_any' : 'expired_soft_deleted_only',
+        via: auth.via,
+        found: items.length,
+        deleted_from_storage: 0,
+        deleted_rows: 0,
+        failed: 0,
+        total_bytes_found: totalBytesFound,
+        meta: { dry_run: true, limit },
+      })
+
+      return NextResponse.json(
+        {
+          ok: true,
+          dryRun: true,
+          via: auth.via,
+          found: items.length,
+          totalBytesFound,
+          deletedFromStorage: 0,
+          deletedRows: 0,
+          failed: 0,
+          mode: includeAllExpired ? 'expired_any' : 'expired_soft_deleted_only',
+          limit,
+        },
+        { status: 200 }
+      )
+    }
 
     if (!items.length) {
+      await supabaseAdmin.from('admin_actions').insert({
+        action: 'purge_expired',
+        mode: includeAllExpired ? 'expired_any' : 'expired_soft_deleted_only',
+        via: auth.via,
+        found: 0,
+        deleted_from_storage: 0,
+        deleted_rows: 0,
+        failed: 0,
+        total_bytes_found: 0,
+        meta: { dry_run: false, limit },
+      })
+
       return NextResponse.json(
         {
           ok: true,
@@ -243,10 +221,10 @@ export async function POST(req: Request) {
     let deletedRows = 0
     let failed = 0
 
+    // 2) borrar storage (best effort) + hard delete row
     for (const r of items) {
       const code = String(r.code || '')
       const file_path = typeof r.file_path === 'string' ? r.file_path : ''
-
       if (!code || !file_path) {
         failed += 1
         continue
@@ -256,7 +234,6 @@ export async function POST(req: Request) {
 
       if (!alreadyStorageDeleted) {
         const { error: delErr } = await supabaseAdmin.storage.from('uploads').remove([file_path])
-
         if (!delErr) deletedFromStorage += 1
 
         const msg = (delErr?.message || '').toLowerCase()
@@ -292,9 +269,23 @@ export async function POST(req: Request) {
       deletedRows += 1
     }
 
+    // log
+    await supabaseAdmin.from('admin_actions').insert({
+      action: 'purge_expired',
+      mode: includeAllExpired ? 'expired_any' : 'expired_soft_deleted_only',
+      via: auth.via,
+      found: items.length,
+      deleted_from_storage: deletedFromStorage,
+      deleted_rows: deletedRows,
+      failed,
+      total_bytes_found: totalBytesFound,
+      meta: { dry_run: false, limit },
+    })
+
     return NextResponse.json(
       {
         ok: true,
+        dryRun: false,
         via: auth.via,
         found: items.length,
         totalBytesFound,
@@ -309,4 +300,8 @@ export async function POST(req: Request) {
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
   }
+}
+
+export async function GET(req: Request) {
+  return POST(req)
 }
