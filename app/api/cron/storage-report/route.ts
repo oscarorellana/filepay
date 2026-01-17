@@ -92,7 +92,10 @@ export async function GET(req: Request) {
 }, 0)
 
     const lines = (expiredRows ?? []).map((r) => {
-      const b = Number(r.file_bytes) || 0
+      const b =
+      typeof r.file_bytes === 'string'
+    ? parseInt(r.file_bytes, 10)
+    : Number(r.file_bytes) || 0
       return `${r.code} · exp ${r.expires_at} · ${bytesToHuman(b)} · paid=${String(r.paid)}`
     })
 
@@ -101,7 +104,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Missing NEXT_PUBLIC_SITE_URL' }, { status: 500 })
                   }
     const token = signAdminAction('purge_expired', 60 * 60) // 1 hora
-    const adminLink = `${siteUrl}/admin/cleanup-expired?token=${encodeURIComponent(token)}`
+    const adminLink = `${siteUrl}/api/admin/cleanup-expired?token=${encodeURIComponent(token)}`
 
 const html = `
   <div style="font-family:system-ui;line-height:1.5">
