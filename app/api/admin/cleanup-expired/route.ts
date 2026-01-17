@@ -18,11 +18,7 @@ function getTokenFromQuery(req: Request) {
 
 function base64urlEncode(input: Buffer | string) {
   const b = Buffer.isBuffer(input) ? input : Buffer.from(input)
-  return b
-    .toString('base64')
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
+  return b.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
 }
 
 function base64urlDecodeToString(input: string) {
@@ -53,7 +49,6 @@ function verifyActionToken(token: string) {
   if (parts.length !== 2) return { ok: false as const, reason: 'bad_format' as const }
 
   const [payloadB64, sigB64] = parts
-
   const mac = crypto.createHmac('sha256', secret).update(payloadB64).digest()
   const expectedSigB64 = base64urlEncode(mac)
 
@@ -87,13 +82,12 @@ function verifyActionToken(token: string) {
 function requireAdmin(req: Request) {
   const expected = (process.env.ADMIN_PURGE_TOKEN || '').trim()
 
-  // Token del request (bearer / x-admin-token / ?token)
   const bearer = getBearer(req)
   const x = (req.headers.get('x-admin-token') || '').trim()
   const qtoken = getTokenFromQuery(req)
   const token = bearer || x || qtoken
 
-  // 1) ADMIN_PURGE_TOKEN (curl)
+  // 1) ADMIN_PURGE_TOKEN (curl / manual)
   if (expected && token === expected) return { ok: true as const, via: 'purge_token' as const }
 
   // 2) token firmado (link email)
@@ -101,7 +95,6 @@ function requireAdmin(req: Request) {
   if (v.ok) return { ok: true as const, via: 'action_token' as const }
 
   if (!expected && (process.env.ADMIN_ACTION_SECRET || '').trim() === '') {
-    // no hay ninguna auth configurada
     return { ok: false as const, reason: 'missing_env' as const }
   }
 
@@ -133,6 +126,84 @@ function includeNotMarked(req: Request) {
   return url.searchParams.get('include_not_marked') === '1'
 }
 
+async function fetchExpired(req: Request) {
+  const limit = parseLimit(req)
+  const includeAllExpired = includeNotMarked(req)
+  const nowIso = new Date().toISOString()
+
+  let q: any = supabaseAdmin
+    .from('file_links')
+    .select('code,file_path,file_bytes,expires_at,deleted_at,storage_deleted')
+    .lte('expires_at', nowIso)
+    .order('expires_at', { ascending: true })
+    .limit(limit)
+
+  if (!includeAllExpired) {
+    // modo seguro: solo los que ya fueron soft-deleted
+    q = q.not('deleted_at', 'is', null)
+  }
+
+  const { data: rows, error: fetchErr } = await q
+  if (fetchErr) throw new Error(fetchErr.message)
+
+  const items = (rows ?? []) as any[]
+  const totalBytesFound = items.reduce((acc, r) => acc + toInt(r.file_bytes), 0)
+
+  return { items, totalBytesFound, limit, includeAllExpired }
+}
+
+/**
+ * GET = PREVIEW (no borra nada)
+ * /api/admin/cleanup-expired?token=...&limit=50
+ */
+export async function GET(req: Request) {
+  const auth = requireAdmin(req)
+  if (!auth.ok) {
+    const status = auth.reason === 'missing_env' ? 500 : 401
+    return NextResponse.json(
+      {
+        error:
+          auth.reason === 'missing_env'
+            ? 'Missing ADMIN_PURGE_TOKEN and ADMIN_ACTION_SECRET'
+            : 'Unauthorized',
+      },
+      { status }
+    )
+  }
+
+  try {
+    const { items, totalBytesFound, limit, includeAllExpired } = await fetchExpired(req)
+
+    return NextResponse.json(
+      {
+        ok: true,
+        via: auth.via,
+        preview: true,
+        found: items.length,
+        totalBytesFound,
+        mode: includeAllExpired ? 'expired_any' : 'expired_soft_deleted_only',
+        limit,
+        // devuelvo lista para UI (no todo el mundo quiere, pero sirve)
+        items: items.map((r) => ({
+          code: String(r.code || ''),
+          file_path: String(r.file_path || ''),
+          file_bytes: r.file_bytes ?? null,
+          expires_at: r.expires_at ?? null,
+          deleted_at: r.deleted_at ?? null,
+          storage_deleted: Boolean(r.storage_deleted),
+        })),
+      },
+      { status: 200 }
+    )
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
+  }
+}
+
+/**
+ * POST = PURGE (borra storage + borra rows)
+ * /api/admin/cleanup-expired?token=...&limit=50
+ */
 export async function POST(req: Request) {
   const auth = requireAdmin(req)
   if (!auth.ok) {
@@ -149,36 +220,19 @@ export async function POST(req: Request) {
   }
 
   try {
-    const limit = parseLimit(req)
-    const includeAllExpired = includeNotMarked(req)
-    const nowIso = new Date().toISOString()
+    const { items, totalBytesFound, limit, includeAllExpired } = await fetchExpired(req)
 
-    // 1) fetch expirados
-    let q: any = supabaseAdmin
-      .from('file_links')
-      .select('code,file_path,file_bytes,expires_at,deleted_at,storage_deleted')
-      .lte('expires_at', nowIso)
-      .order('expires_at', { ascending: true })
-      .limit(limit)
-
-    if (!includeAllExpired) {
-      // modo seguro: solo los que ya fueron soft-deleted (deleted_at NOT NULL)
-      q = q.not('deleted_at', 'is', null)
-    }
-
-    const { data: rows, error: fetchErr } = await q
-    if (fetchErr) throw new Error(fetchErr.message)
-
-    const items = (rows ?? []) as any[]
     if (!items.length) {
       return NextResponse.json(
         {
           ok: true,
           via: auth.via,
           found: 0,
+          totalBytesFound: 0,
           deletedFromStorage: 0,
           deletedRows: 0,
           failed: 0,
+          mode: includeAllExpired ? 'expired_any' : 'expired_soft_deleted_only',
           limit,
         },
         { status: 200 }
@@ -189,17 +243,11 @@ export async function POST(req: Request) {
     let deletedRows = 0
     let failed = 0
 
-    // 2) borrar storage (best effort) + hard delete row
     for (const r of items) {
       const code = String(r.code || '')
       const file_path = typeof r.file_path === 'string' ? r.file_path : ''
 
-      if (!code) {
-        failed += 1
-        continue
-      }
-
-      if (!file_path) {
+      if (!code || !file_path) {
         failed += 1
         continue
       }
@@ -231,7 +279,6 @@ export async function POST(req: Request) {
         }
       }
 
-      // 3) hard delete row (solo si storage_deleted=true)
       const { error: delRowErr } = await supabaseAdmin
         .from('file_links')
         .delete()
@@ -244,8 +291,6 @@ export async function POST(req: Request) {
       }
       deletedRows += 1
     }
-
-    const totalBytesFound = items.reduce((acc, r) => acc + toInt(r.file_bytes), 0)
 
     return NextResponse.json(
       {
@@ -264,9 +309,4 @@ export async function POST(req: Request) {
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
   }
-}
-
-// opcional: para probar en browser
-export async function GET(req: Request) {
-  return POST(req)
 }
