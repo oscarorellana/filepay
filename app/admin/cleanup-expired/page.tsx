@@ -44,6 +44,76 @@ function getBaseUrlFromEnv(): string | null {
   return s.replace(/\/+$/, '')
 }
 
+const ui = {
+  page: {
+    minHeight: '100svh',
+    padding: 24,
+    fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial',
+    color: '#fff',
+    background:
+      'radial-gradient(1200px 600px at 18% 0%, rgba(124,58,237,0.26), transparent 60%), radial-gradient(900px 500px at 90% 10%, rgba(59,130,246,0.22), transparent 55%), #07070a',
+  } as const,
+
+  container: { maxWidth: 920, margin: '0 auto' } as const,
+
+  card: {
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 16,
+    border: '1px solid rgba(255,255,255,0.12)',
+    background: 'rgba(255,255,255,0.06)',
+    boxShadow: '0 18px 40px rgba(0,0,0,0.35)',
+  } as const,
+
+  cardDanger: {
+    marginTop: 18,
+    padding: 14,
+    borderRadius: 16,
+    border: '1px solid rgba(248,113,113,0.35)',
+    background: 'rgba(248,113,113,0.10)',
+    boxShadow: '0 18px 40px rgba(0,0,0,0.35)',
+  } as const,
+
+  muted: { opacity: 0.78 } as const,
+  tiny: { fontSize: 12, opacity: 0.72 } as const,
+
+  btn: {
+    padding: '10px 14px',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.14)',
+    background: 'rgba(255,255,255,0.06)',
+    color: '#fff',
+    textDecoration: 'none',
+    fontWeight: 900,
+    cursor: 'pointer',
+    display: 'inline-block',
+  } as const,
+
+  btnPrimary: {
+    padding: '10px 14px',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.18)',
+    background: '#ffffff',
+    color: '#0b0b10',
+    textDecoration: 'none',
+    fontWeight: 950,
+    cursor: 'pointer',
+    boxShadow: '0 12px 28px rgba(0,0,0,0.35)',
+  } as const,
+
+  btnDanger: {
+    padding: '10px 14px',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.18)',
+    background: 'linear-gradient(135deg, rgba(248,113,113,0.95), rgba(248,113,113,0.78))',
+    color: '#0b0b10',
+    textDecoration: 'none',
+    fontWeight: 950,
+    cursor: 'pointer',
+    boxShadow: '0 12px 28px rgba(0,0,0,0.35)',
+  } as const,
+}
+
 export default async function Page(props: { searchParams?: any }) {
   const sp = await resolveSearchParams(props.searchParams)
 
@@ -59,20 +129,18 @@ export default async function Page(props: { searchParams?: any }) {
 
   if (!token) {
     return (
-      <main style={{ padding: 24, fontFamily: 'system-ui' }}>
-        <h1>Unauthorized</h1>
-        <p>Missing token.</p>
-        <p style={{ opacity: 0.7, fontSize: 12 }}>Open the latest email report again.</p>
+      <main style={ui.page}>
+        <div style={ui.container}>
+          <h1 style={{ margin: 0 }}>Unauthorized</h1>
+          <p style={{ marginTop: 10 }}>Missing token.</p>
+          <p style={ui.tiny}>Open the latest email report again.</p>
 
-        <pre style={{ marginTop: 12, fontSize: 12, opacity: 0.7, whiteSpace: 'pre-wrap' }}>
-          debug searchParams: {JSON.stringify(sp, null, 2)}
-        </pre>
-
-        <p style={{ marginTop: 12 }}>
-          <Link href="/" style={{ color: '#111827' }}>
-            ← Back to FilePay
-          </Link>
-        </p>
+          <p style={{ marginTop: 14 }}>
+            <Link href="/" style={{ color: '#fff' }}>
+              ← Back to FilePay
+            </Link>
+          </p>
+        </div>
       </main>
     )
   }
@@ -80,22 +148,21 @@ export default async function Page(props: { searchParams?: any }) {
   const base = getBaseUrlFromEnv()
   if (!base) {
     return (
-      <main style={{ padding: 24, fontFamily: 'system-ui', maxWidth: 900 }}>
-        <h1>Preview failed</h1>
-        <p style={{ color: '#b91c1c' }}>Missing NEXT_PUBLIC_SITE_URL</p>
-        <p style={{ opacity: 0.75, fontSize: 12 }}>
-          Set NEXT_PUBLIC_SITE_URL in Vercel env vars (example: https://filepay.vercel.app)
-        </p>
-        <p style={{ marginTop: 12 }}>
-          <Link href="/" style={{ color: '#111827' }}>
-            ← Back to FilePay
-          </Link>
-        </p>
+      <main style={ui.page}>
+        <div style={ui.container}>
+          <h1 style={{ margin: 0 }}>Preview failed</h1>
+          <p style={{ marginTop: 10, color: 'rgba(248,113,113,0.95)' }}>Missing NEXT_PUBLIC_SITE_URL</p>
+          <p style={ui.tiny}>Set it in Vercel (example: https://filepay.vercel.app)</p>
+          <p style={{ marginTop: 14 }}>
+            <Link href="/" style={{ color: '#fff' }}>
+              ← Back to FilePay
+            </Link>
+          </p>
+        </div>
       </main>
     )
   }
 
-  // ✅ ABSOLUTE URL (server fetch requires absolute)
   const apiUrl =
     `${base}/api/admin/cleanup-expired` +
     `?token=${encodeURIComponent(token)}` +
@@ -127,32 +194,36 @@ export default async function Page(props: { searchParams?: any }) {
 
   if (unauthorized) {
     return (
-      <main style={{ padding: 24, fontFamily: 'system-ui' }}>
-        <h1>Unauthorized</h1>
-        <p>This link is invalid or expired.</p>
-        <p style={{ opacity: 0.7, fontSize: 12 }}>Open the latest email report again.</p>
-        <p style={{ marginTop: 12 }}>
-          <Link href="/" style={{ color: '#111827' }}>
-            ← Back to FilePay
-          </Link>
-        </p>
+      <main style={ui.page}>
+        <div style={ui.container}>
+          <h1 style={{ margin: 0 }}>Unauthorized</h1>
+          <p style={{ marginTop: 10 }}>This link is invalid or expired.</p>
+          <p style={ui.tiny}>Open the latest email report again.</p>
+          <p style={{ marginTop: 14 }}>
+            <Link href="/" style={{ color: '#fff' }}>
+              ← Back to FilePay
+            </Link>
+          </p>
+        </div>
       </main>
     )
   }
 
   if (serverError) {
     return (
-      <main style={{ padding: 24, fontFamily: 'system-ui', maxWidth: 900 }}>
-        <h1>Preview failed</h1>
-        <p style={{ color: '#b91c1c' }}>{serverError}</p>
-        <pre style={{ marginTop: 12, fontSize: 12, opacity: 0.75, whiteSpace: 'pre-wrap' }}>
-          debug apiUrl: {apiUrl}
-        </pre>
-        <p style={{ marginTop: 12 }}>
-          <Link href="/" style={{ color: '#111827' }}>
-            ← Back to FilePay
-          </Link>
-        </p>
+      <main style={ui.page}>
+        <div style={ui.container}>
+          <h1 style={{ margin: 0 }}>Preview failed</h1>
+          <p style={{ marginTop: 10, color: 'rgba(248,113,113,0.95)' }}>{serverError}</p>
+          <pre style={{ marginTop: 12, fontSize: 12, opacity: 0.75, whiteSpace: 'pre-wrap' }}>
+            debug apiUrl: {apiUrl}
+          </pre>
+          <p style={{ marginTop: 14 }}>
+            <Link href="/" style={{ color: '#fff' }}>
+              ← Back to FilePay
+            </Link>
+          </p>
+        </div>
       </main>
     )
   }
@@ -169,115 +240,75 @@ export default async function Page(props: { searchParams?: any }) {
     (includeNotMarked ? `&include_not_marked=1` : ``)
 
   return (
-    <main style={{ padding: 24, fontFamily: 'system-ui', maxWidth: 900 }}>
-      <h1 style={{ margin: 0 }}>Expired cleanup (preview)</h1>
-      <p style={{ marginTop: 8, opacity: 0.8 }}>
-        This page is a <b>dry run</b>. It does <b>not</b> delete anything until you confirm.
-      </p>
-
-      <div
-        style={{
-          marginTop: 16,
-          padding: 14,
-          borderRadius: 12,
-          border: '1px solid #e5e7eb',
-          background: '#f9fafb',
-        }}
-      >
-        <div style={{ display: 'grid', gap: 6 }}>
-          <div>
-            <b>Authorized via:</b> {preview?.via || 'unknown'}
-          </div>
-          <div>
-            <b>Mode:</b>{' '}
-            {includeNotMarked ? 'expired_any (includes not soft-deleted)' : 'expired_soft_deleted_only (safer)'}
-          </div>
-          <div>
-            <b>Found:</b> {found}
-          </div>
-          <div>
-            <b>Total size:</b> {preview?.totalBytesFoundHuman || '0 B'}
-          </div>
-          <div style={{ fontSize: 12, opacity: 0.75 }}>Limit: {limit}</div>
-        </div>
-
-        <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <a
-            href={includeNotMarked ? safeUrl : riskyUrl}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 10,
-              border: '1px solid #111827',
-              background: '#fff',
-              color: '#111827',
-              textDecoration: 'none',
-              fontWeight: 800,
-            }}
-          >
-            {includeNotMarked ? 'Use safer mode (only soft-deleted)' : 'Include not soft-deleted (riskier)'}
-          </a>
-
-          <a
-            href={includeNotMarked ? riskyUrl : safeUrl}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 10,
-              border: '1px solid #e5e7eb',
-              background: '#fff',
-              color: '#111827',
-              textDecoration: 'none',
-              fontWeight: 800,
-            }}
-          >
-            Refresh
-          </a>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 18, padding: 14, borderRadius: 12, border: '1px solid #fee2e2', background: '#fff1f2' }}>
-        <h3 style={{ margin: 0 }}>Confirm delete</h3>
-        <p style={{ marginTop: 8, marginBottom: 12 }}>
-          If you continue, FilePay will attempt to delete expired files from <b>Supabase Storage</b> and then remove rows
-          from <b>file_links</b> (only after <code>storage_deleted=true</code>).
+    <main style={ui.page}>
+      <div style={ui.container}>
+        <h1 style={{ margin: 0, fontWeight: 980, letterSpacing: -0.4 }}>Expired cleanup (preview)</h1>
+        <p style={{ marginTop: 10, ...ui.muted }}>
+          This page is a <b>dry run</b>. It does <b>not</b> delete anything until you confirm.
         </p>
 
-        <form action={actionUrl} method="POST" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button
-            type="submit"
-            style={{
-              padding: '10px 14px',
-              borderRadius: 10,
-              border: '1px solid #111827',
-              background: '#111827',
-              color: 'white',
-              fontWeight: 900,
-              cursor: found === 0 ? 'not-allowed' : 'pointer',
-              opacity: found === 0 ? 0.6 : 1,
-            }}
-            disabled={found === 0}
-          >
-            Delete expired now
-          </button>
+        <div style={ui.card}>
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div>
+              <b>Authorized via:</b> {preview?.via || 'unknown'}
+            </div>
+            <div>
+              <b>Mode:</b>{' '}
+              {includeNotMarked ? 'expired_any (includes not soft-deleted)' : 'expired_soft_deleted_only (safer)'}
+            </div>
+            <div>
+              <b>Found:</b> {found}
+            </div>
+            <div>
+              <b>Total size:</b> {preview?.totalBytesFoundHuman || '0 B'}
+            </div>
+            <div style={ui.tiny}>Limit: {limit}</div>
+          </div>
 
-          <Link
-            href="/"
-            style={{
-              padding: '10px 14px',
-              borderRadius: 10,
-              border: '1px solid #e5e7eb',
-              background: '#fff',
-              color: '#111827',
-              textDecoration: 'none',
-              fontWeight: 900,
-            }}
-          >
-            Cancel
-          </Link>
-        </form>
+          <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <a href={includeNotMarked ? safeUrl : riskyUrl} style={ui.btn}>
+              {includeNotMarked ? 'Use safer mode (only soft-deleted)' : 'Include not soft-deleted (riskier)'}
+            </a>
 
-        <p style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-          Tip: Use safer mode first. If everything looks right, switch to “include not soft-deleted”.
-        </p>
+            <a href={includeNotMarked ? riskyUrl : safeUrl} style={ui.btn}>
+              Refresh
+            </a>
+          </div>
+        </div>
+
+        <div style={ui.cardDanger}>
+          <h3 style={{ margin: 0 }}>Confirm delete</h3>
+          <p style={{ marginTop: 10, marginBottom: 12, ...ui.muted }}>
+            If you continue, FilePay will attempt to delete expired files from <b>Supabase Storage</b> and then remove rows
+            from <b>file_links</b> (only after <code>storage_deleted=true</code>).
+          </p>
+
+          <form
+            action={actionUrl}
+            method="POST"
+            style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}
+          >
+            <button
+              type="submit"
+              style={{
+                ...ui.btnDanger,
+                opacity: found === 0 ? 0.6 : 1,
+                cursor: found === 0 ? 'not-allowed' : 'pointer',
+              }}
+              disabled={found === 0}
+            >
+              Delete expired now
+            </button>
+
+            <Link href="/" style={ui.btnPrimary}>
+              Cancel
+            </Link>
+          </form>
+
+          <p style={{ marginTop: 10, ...ui.tiny }}>
+            Tip: Use safer mode first. If everything looks right, switch to “include not soft-deleted”.
+          </p>
+        </div>
       </div>
     </main>
   )
