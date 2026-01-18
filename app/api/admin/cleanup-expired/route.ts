@@ -133,7 +133,12 @@ export async function POST(req: Request) {
   if (!auth.ok) {
     const status = auth.reason === 'missing_env' ? 500 : 401
     return NextResponse.json(
-      { error: auth.reason === 'missing_env' ? 'Missing ADMIN_PURGE_TOKEN and ADMIN_ACTION_SECRET' : 'Unauthorized' },
+      {
+        error:
+          auth.reason === 'missing_env'
+            ? 'Missing ADMIN_PURGE_TOKEN and ADMIN_ACTION_SECRET'
+            : 'Unauthorized',
+      },
       { status }
     )
   }
@@ -144,7 +149,6 @@ export async function POST(req: Request) {
     const dryRun = isDryRun(req)
     const nowIso = new Date().toISOString()
 
-    // 1) fetch expirados
     let q: any = supabaseAdmin
       .from('file_links')
       .select('code,file_path,file_bytes,expires_at,deleted_at,storage_deleted')
@@ -188,7 +192,6 @@ export async function POST(req: Request) {
       return NextResponse.json(payload, { status: 200 })
     }
 
-    // DRY RUN: no borra nada
     if (dryRun) {
       const payload = {
         ok: true,
@@ -220,7 +223,6 @@ export async function POST(req: Request) {
     let failed = 0
     const failures: Array<{ code: string; file_path: string; error: string }> = []
 
-    // 2) Si include_not_marked=1, primero SOFT DELETE (marca deleted_at)
     if (includeAllExpired) {
       const codes = items.map((r) => String(r.code || '')).filter(Boolean)
       if (codes.length) {
@@ -232,7 +234,6 @@ export async function POST(req: Request) {
           .select('code')
 
         if (updErr) {
-          // no abortes todo, pero cuenta fallos
           failures.push({ code: '(batch)', file_path: '(n/a)', error: updErr.message })
         } else {
           softDeleted = (updated ?? []).length
@@ -240,14 +241,17 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3) borrar storage + marcar storage_deleted + hard delete fila
     for (const r of items) {
       const code = String(r.code || '')
       const file_path = typeof r.file_path === 'string' ? r.file_path : ''
 
       if (!code || !file_path) {
         failed += 1
-        failures.push({ code: code || '(missing)', file_path: file_path || '(missing)', error: 'missing code/file_path' })
+        failures.push({
+          code: code || '(missing)',
+          file_path: file_path || '(missing)',
+          error: 'missing code/file_path',
+        })
         continue
       }
 
@@ -256,9 +260,7 @@ export async function POST(req: Request) {
       if (!alreadyStorageDeleted) {
         const { error: delErr } = await supabaseAdmin.storage.from('uploads').remove([file_path])
 
-        if (!delErr) {
-          deletedFromStorage += 1
-        }
+        if (!delErr) deletedFromStorage += 1
 
         const msg = (delErr?.message || '').toLowerCase()
         const treatAsGone =
@@ -307,12 +309,11 @@ export async function POST(req: Request) {
       deletedFromStorage,
       deletedRows,
       failed,
-      failures: failures.slice(0, 20), // para debug sin explotar tamaño
+      failures: failures.slice(0, 20),
       mode: includeAllExpired ? 'expired_any' : 'expired_soft_deleted_only',
       limit,
     }
 
-    // ✅ si viene desde la página (form), redirige a done page con resumen
     if (wantsHtmlRedirect(req)) {
       const url = new URL('/admin/cleanup-expired/done', req.url)
       url.searchParams.set('via', payload.via)

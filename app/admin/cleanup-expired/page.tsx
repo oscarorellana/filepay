@@ -73,14 +73,6 @@ export default async function Page({
   }
 
   const { data, error } = await q
-  const rows = (data ?? []) as Row[]
-
-  const found = rows.length
-  const totalBytesFound = rows.reduce((acc, r) => acc + toInt(r.file_bytes), 0)
-
-  const softDeletedCount = rows.reduce((acc, r) => acc + (r.deleted_at ? 1 : 0), 0)
-  const alreadyStorageDeletedCount = rows.reduce((acc, r) => acc + (r.storage_deleted ? 1 : 0), 0)
-
   if (error) {
     return (
       <main style={{ padding: 24, fontFamily: 'system-ui', maxWidth: 900 }}>
@@ -90,14 +82,19 @@ export default async function Page({
     )
   }
 
+  const rows = (data ?? []) as Row[]
+  const found = rows.length
+  const totalBytesFound = rows.reduce((acc, r) => acc + toInt(r.file_bytes), 0)
+  const softDeletedCount = rows.reduce((acc, r) => acc + (r.deleted_at ? 1 : 0), 0)
+  const alreadyStorageDeletedCount = rows.reduce((acc, r) => acc + (r.storage_deleted ? 1 : 0), 0)
+
   const baseUrl = `/admin/cleanup-expired?token=${encodeURIComponent(token)}`
-  const toggleUrl = includeNotMarked ? baseUrl : `${baseUrl}&include_not_marked=1`
   const safeUrl = baseUrl // include_not_marked off
+  const toggleUrl = includeNotMarked ? safeUrl : `${baseUrl}&include_not_marked=1`
   const limitUrl = `${baseUrl}${includeNotMarked ? '&include_not_marked=1' : ''}&limit=${limit}`
 
-  const actionUrl = `/api/admin/cleanup-expired?token=${encodeURIComponent(token)}${
-    includeNotMarked ? '&include_not_marked=1' : ''
-  }`
+  // ✅ API endpoint SIN token en query — lo mandamos en el POST body (más seguro/limpio)
+  const actionUrl = `/api/admin/cleanup-expired`
 
   return (
     <main style={{ padding: 24, fontFamily: 'system-ui', maxWidth: 900 }}>
@@ -118,7 +115,9 @@ export default async function Page({
         <div style={{ display: 'grid', gap: 6 }}>
           <div>
             <b>Mode:</b>{' '}
-            {includeNotMarked ? 'expired_any (includes not soft-deleted)' : 'expired_soft_deleted_only (safer)'}
+            {includeNotMarked
+              ? 'expired_any (includes not soft-deleted)'
+              : 'expired_soft_deleted_only (safer)'}
           </div>
           <div>
             <b>Found:</b> {found}
@@ -197,14 +196,32 @@ export default async function Page({
       )}
 
       {/* CONFIRM */}
-      <div style={{ marginTop: 18, padding: 14, borderRadius: 12, border: '1px solid #fee2e2', background: '#fff1f2' }}>
+      <div
+        style={{
+          marginTop: 18,
+          padding: 14,
+          borderRadius: 12,
+          border: '1px solid #fee2e2',
+          background: '#fff1f2',
+        }}
+      >
         <h3 style={{ margin: 0 }}>Confirm delete</h3>
         <p style={{ marginTop: 8, marginBottom: 12 }}>
           If you continue, FilePay will attempt to delete the expired files from <b>Supabase Storage</b> and then remove rows
           from the <b>file_links</b> table (only where <code>storage_deleted=true</code>).
         </p>
 
-        <form action={actionUrl} method="POST" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <form
+          action={actionUrl}
+          method="POST"
+          style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}
+        >
+          {/* ✅ mandamos todo por body */}
+          <input type="hidden" name="token" value={token} />
+          <input type="hidden" name="include_not_marked" value={includeNotMarked ? '1' : '0'} />
+          <input type="hidden" name="limit" value={String(limit)} />
+          <input type="hidden" name="dryRun" value="0" />
+
           <button
             type="submit"
             style={{
