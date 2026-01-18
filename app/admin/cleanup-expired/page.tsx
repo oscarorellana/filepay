@@ -26,22 +26,29 @@ type ApiPayload = {
   failures?: Array<{ code: string; file_path: string; error: string }>
 }
 
-function getSiteUrl() {
-  const s = (process.env.NEXT_PUBLIC_SITE_URL || '').trim()
-  if (s) return s.replace(/\/+$/, '')
-  // local fallback (dev)
-  return 'http://localhost:3000'
+// ✅ soporta searchParams como object o Promise (Next 15)
+async function resolveSearchParams(sp: any): Promise<Record<string, any>> {
+  const v = await Promise.resolve(sp ?? {})
+  return (v && typeof v === 'object') ? v : {}
 }
 
-export default async function Page({
-  searchParams,
-}: {
-  searchParams: { token?: string; include_not_marked?: string; limit?: string }
+function pickFirstString(v: unknown): string {
+  if (typeof v === 'string') return v
+  if (Array.isArray(v) && typeof v[0] === 'string') return v[0]
+  return ''
+}
+
+export default async function Page(props: {
+  searchParams?: any
 }) {
-  const token = (searchParams.token || '').trim()
-  const includeNotMarked = searchParams.include_not_marked === '1'
+  const sp = await resolveSearchParams(props.searchParams)
+
+  const token = pickFirstString(sp.token).trim()
+  const includeNotMarked = pickFirstString(sp.include_not_marked).trim() === '1'
+
   const limit = (() => {
-    const n = Number(searchParams.limit || '200')
+    const raw = pickFirstString(sp.limit).trim()
+    const n = Number(raw || '200')
     if (!Number.isFinite(n)) return 200
     return Math.min(Math.max(Math.floor(n), 1), 500)
   })()
@@ -52,6 +59,12 @@ export default async function Page({
         <h1>Unauthorized</h1>
         <p>Missing token.</p>
         <p style={{ opacity: 0.7, fontSize: 12 }}>Open the latest email report again.</p>
+
+        {/* Debug corto (puedes borrar luego) */}
+        <pre style={{ marginTop: 12, fontSize: 12, opacity: 0.7, whiteSpace: 'pre-wrap' }}>
+          debug searchParams: {JSON.stringify(sp, null, 2)}
+        </pre>
+
         <p style={{ marginTop: 12 }}>
           <Link href="/" style={{ color: '#111827' }}>
             ← Back to FilePay
@@ -61,15 +74,13 @@ export default async function Page({
     )
   }
 
-  const siteUrl = getSiteUrl()
-
-  // ✅ Dry-run preview using the API (the API is the source of truth for auth)
- const apiUrl =
-  `/api/admin/cleanup-expired` +
-  `?token=${encodeURIComponent(token)}` +
-  `&dry_run=1` +
-  `&limit=${limit}` +
-  (includeNotMarked ? `&include_not_marked=1` : ``)
+  // ✅ Dry-run preview using the API (API = source of truth)
+  const apiUrl =
+    `/api/admin/cleanup-expired` +
+    `?token=${encodeURIComponent(token)}` +
+    `&dry_run=1` +
+    `&limit=${limit}` +
+    (includeNotMarked ? `&include_not_marked=1` : ``)
 
   let preview: ApiPayload | null = null
   let unauthorized = false
@@ -156,7 +167,9 @@ export default async function Page({
           </div>
           <div>
             <b>Mode:</b>{' '}
-            {includeNotMarked ? 'expired_any (includes not soft-deleted)' : 'expired_soft_deleted_only (safer)'}
+            {includeNotMarked
+              ? 'expired_any (includes not soft-deleted)'
+              : 'expired_soft_deleted_only (safer)'}
           </div>
           <div>
             <b>Found:</b> {found}
