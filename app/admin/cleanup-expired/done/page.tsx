@@ -1,64 +1,81 @@
 // app/admin/cleanup-expired/done/page.tsx
+import Link from 'next/link'
+
 export default function Done({
   searchParams,
 }: {
-  searchParams: Record<string, string | string[] | undefined>
-}) {
-  const get = (k: string) => {
-    const v = searchParams[k]
-    return Array.isArray(v) ? v[0] : v
+  searchParams: {
+    found?: string
+    deletedFromStorage?: string
+    deletedRows?: string
+    failed?: string
   }
+}) {
+  const found = Number(searchParams.found || 0)
+  const deletedFromStorage = Number(searchParams.deletedFromStorage || 0)
+  const deletedRows = Number(searchParams.deletedRows || 0)
+  const failed = Number(searchParams.failed || 0)
 
-  const via = get('via') ?? 'unknown'
-  const mode = get('mode') ?? 'unknown'
-  const dry = get('dryRun') ?? '0'
-
-  const found = get('found') ?? '0'
-  const totalBytesHuman = get('totalBytesFoundHuman') ?? ''
-  const softDeleted = get('softDeleted') ?? '0'
-  const deletedFromStorage = get('deletedFromStorage') ?? '0'
-  const deletedRows = get('deletedRows') ?? '0'
-  const failed = get('failed') ?? '0'
+  const nothingToDo = found === 0
 
   return (
-    <main style={{ padding: 24, fontFamily: 'system-ui', maxWidth: 720 }}>
-      <h1>{dry === '1' ? 'Dry run complete ✅' : 'Cleanup complete ✅'}</h1>
+    <main
+      style={{
+        padding: 32,
+        fontFamily: 'system-ui',
+        maxWidth: 640,
+        margin: '0 auto',
+        lineHeight: 1.6,
+      }}
+    >
+      {nothingToDo ? (
+        <>
+          <h1>All good! 🎉</h1>
+          <p>
+            There were <b>no expired files</b> to delete.
+          </p>
+          <p style={{ opacity: 0.8 }}>
+            Your storage is clean and everything is up to date.
+          </p>
+        </>
+      ) : (
+        <>
+          <h1>Cleanup successful ✅</h1>
+          <p>
+            Expired files were permanently removed.
+          </p>
 
-      <div style={{ marginTop: 10, opacity: 0.85 }}>
-        <div>
-          <b>Authorized via:</b> {via}
-        </div>
-        <div>
-          <b>Mode:</b> {mode}
-        </div>
+          <ul style={{ marginTop: 16 }}>
+            <li>
+              <b>Files found:</b> {found}
+            </li>
+            <li>
+              <b>Storage deleted:</b> {deletedFromStorage}
+            </li>
+            <li>
+              <b>Database rows removed:</b> {deletedRows}
+            </li>
+            {failed > 0 && (
+              <li style={{ color: '#b91c1c' }}>
+                <b>Failed:</b> {failed}
+              </li>
+            )}
+          </ul>
+        </>
+      )}
+
+      <div style={{ marginTop: 28 }}>
+        <Link
+          href="/"
+          style={{
+            textDecoration: 'none',
+            fontWeight: 700,
+            color: '#111827',
+          }}
+        >
+          ← Back to FilePay
+        </Link>
       </div>
-
-      <ul style={{ marginTop: 16, lineHeight: 1.8 }}>
-        <li>
-          <b>Found:</b> {found}
-          {totalBytesHuman ? ` (${totalBytesHuman})` : ''}
-        </li>
-        <li>
-          <b>Soft deleted:</b> {softDeleted}
-        </li>
-        <li>
-          <b>Storage deleted:</b> {deletedFromStorage}
-        </li>
-        <li>
-          <b>Hard deleted (DB):</b> {deletedRows}
-        </li>
-        <li>
-          <b>Failed:</b> {failed}
-        </li>
-      </ul>
-
-      <p style={{ marginTop: 14, opacity: 0.75, fontSize: 13 }}>
-        Storage deletion is best effort; DB rows are deleted only after storage_deleted=true.
-      </p>
-
-      <a href="/" style={{ display: 'inline-block', marginTop: 12 }}>
-        ← Back to FilePay
-      </a>
     </main>
   )
 }
