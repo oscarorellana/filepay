@@ -29,7 +29,7 @@ type ApiPayload = {
 // ✅ soporta searchParams como object o Promise (Next 15)
 async function resolveSearchParams(sp: any): Promise<Record<string, any>> {
   const v = await Promise.resolve(sp ?? {})
-  return (v && typeof v === 'object') ? v : {}
+  return v && typeof v === 'object' ? v : {}
 }
 
 function pickFirstString(v: unknown): string {
@@ -38,9 +38,7 @@ function pickFirstString(v: unknown): string {
   return ''
 }
 
-export default async function Page(props: {
-  searchParams?: any
-}) {
+export default async function Page(props: { searchParams?: any }) {
   const sp = await resolveSearchParams(props.searchParams)
 
   const token = pickFirstString(sp.token).trim()
@@ -75,6 +73,7 @@ export default async function Page(props: {
   }
 
   // ✅ Dry-run preview using the API (API = source of truth)
+  // IMPORTANTE: URL RELATIVA (no construyas absoluta aquí)
   const apiUrl =
     `/api/admin/cleanup-expired` +
     `?token=${encodeURIComponent(token)}` +
@@ -135,9 +134,10 @@ export default async function Page(props: {
 
   const found = Number(preview?.found || 0)
 
+  // ✅ URLs para navegación
   const baseUrl = `/admin/cleanup-expired?token=${encodeURIComponent(token)}&limit=${limit}`
   const safeUrl = baseUrl
-  const toggleUrl = includeNotMarked ? safeUrl : `${baseUrl}&include_not_marked=1`
+  const riskyUrl = `${baseUrl}&include_not_marked=1`
 
   // ✅ Real delete endpoint (NOT dry-run)
   const actionUrl =
@@ -167,9 +167,7 @@ export default async function Page(props: {
           </div>
           <div>
             <b>Mode:</b>{' '}
-            {includeNotMarked
-              ? 'expired_any (includes not soft-deleted)'
-              : 'expired_soft_deleted_only (safer)'}
+            {includeNotMarked ? 'expired_any (includes not soft-deleted)' : 'expired_soft_deleted_only (safer)'}
           </div>
           <div>
             <b>Found:</b> {found}
@@ -182,7 +180,7 @@ export default async function Page(props: {
 
         <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <a
-            href={includeNotMarked ? safeUrl : toggleUrl}
+            href={includeNotMarked ? safeUrl : riskyUrl}
             style={{
               padding: '8px 12px',
               borderRadius: 10,
@@ -197,7 +195,7 @@ export default async function Page(props: {
           </a>
 
           <a
-            href={includeNotMarked ? toggleUrl : safeUrl}
+            href={includeNotMarked ? riskyUrl : safeUrl}
             style={{
               padding: '8px 12px',
               borderRadius: 10,
@@ -213,7 +211,15 @@ export default async function Page(props: {
         </div>
       </div>
 
-      <div style={{ marginTop: 18, padding: 14, borderRadius: 12, border: '1px solid #fee2e2', background: '#fff1f2' }}>
+      <div
+        style={{
+          marginTop: 18,
+          padding: 14,
+          borderRadius: 12,
+          border: '1px solid #fee2e2',
+          background: '#fff1f2',
+        }}
+      >
         <h3 style={{ margin: 0 }}>Confirm delete</h3>
         <p style={{ marginTop: 8, marginBottom: 12 }}>
           If you continue, FilePay will attempt to delete expired files from <b>Supabase Storage</b> and then remove rows
@@ -230,7 +236,8 @@ export default async function Page(props: {
               background: '#111827',
               color: 'white',
               fontWeight: 900,
-              cursor: 'pointer',
+              cursor: found === 0 ? 'not-allowed' : 'pointer',
+              opacity: found === 0 ? 0.6 : 1,
             }}
             disabled={found === 0}
           >
@@ -257,6 +264,16 @@ export default async function Page(props: {
           Tip: Use safer mode first. If everything looks right, switch to “include not soft-deleted”.
         </p>
       </div>
+
+      {/* (Opcional) mini debug de fallas */}
+      {Array.isArray(preview?.failures) && preview!.failures!.length > 0 && (
+        <div style={{ marginTop: 18, padding: 12, borderRadius: 12, border: '1px solid #e5e7eb' }}>
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>Failures (preview)</div>
+          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.45 }}>
+            {preview!.failures!.slice(0, 20).map((f, i) => `${i + 1}. ${f.code} · ${f.file_path} · ${f.error}`).join('\n')}
+          </pre>
+        </div>
+      )}
     </main>
   )
 }
