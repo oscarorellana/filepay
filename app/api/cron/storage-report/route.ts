@@ -104,7 +104,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Missing NEXT_PUBLIC_SITE_URL' }, { status: 500 })
                   }
     const token = signAdminAction('purge_expired', 60 * 60) // 1 hora
-    const adminLink = `${siteUrl}/api/admin/cleanup-expired?token=${encodeURIComponent(token)}`
+    const adminLink = `${siteUrl}/admin/cleanup-expired?token=${encodeURIComponent(token)}`
 
 const html = `
   <div style="font-family:system-ui;line-height:1.5">
