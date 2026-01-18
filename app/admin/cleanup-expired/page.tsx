@@ -2,6 +2,7 @@
 import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
+export const revalidate = 0
 export const runtime = 'nodejs'
 
 type ApiPayload = {
@@ -63,12 +64,12 @@ export default async function Page({
   const siteUrl = getSiteUrl()
 
   // ✅ Dry-run preview using the API (the API is the source of truth for auth)
-  const apiUrl =
-    `${siteUrl}/api/admin/cleanup-expired` +
-    `?token=${encodeURIComponent(token)}` +
-    `&dry_run=1` +
-    `&limit=${limit}` +
-    (includeNotMarked ? `&include_not_marked=1` : ``)
+ const apiUrl =
+  `/api/admin/cleanup-expired` +
+  `?token=${encodeURIComponent(token)}` +
+  `&dry_run=1` +
+  `&limit=${limit}` +
+  (includeNotMarked ? `&include_not_marked=1` : ``)
 
   let preview: ApiPayload | null = null
   let unauthorized = false
