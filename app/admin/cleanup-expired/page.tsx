@@ -38,6 +38,12 @@ function pickFirstString(v: unknown): string {
   return ''
 }
 
+function getBaseUrlFromEnv(): string | null {
+  const s = (process.env.NEXT_PUBLIC_SITE_URL || '').trim()
+  if (!s) return null
+  return s.replace(/\/+$/, '')
+}
+
 export default async function Page(props: { searchParams?: any }) {
   const sp = await resolveSearchParams(props.searchParams)
 
@@ -58,7 +64,6 @@ export default async function Page(props: { searchParams?: any }) {
         <p>Missing token.</p>
         <p style={{ opacity: 0.7, fontSize: 12 }}>Open the latest email report again.</p>
 
-        {/* Debug corto (puedes borrar luego) */}
         <pre style={{ marginTop: 12, fontSize: 12, opacity: 0.7, whiteSpace: 'pre-wrap' }}>
           debug searchParams: {JSON.stringify(sp, null, 2)}
         </pre>
@@ -72,10 +77,27 @@ export default async function Page(props: { searchParams?: any }) {
     )
   }
 
-  // ✅ Dry-run preview using the API (API = source of truth)
-  // IMPORTANTE: URL RELATIVA (no construyas absoluta aquí)
+  const base = getBaseUrlFromEnv()
+  if (!base) {
+    return (
+      <main style={{ padding: 24, fontFamily: 'system-ui', maxWidth: 900 }}>
+        <h1>Preview failed</h1>
+        <p style={{ color: '#b91c1c' }}>Missing NEXT_PUBLIC_SITE_URL</p>
+        <p style={{ opacity: 0.75, fontSize: 12 }}>
+          Set NEXT_PUBLIC_SITE_URL in Vercel env vars (example: https://filepay.vercel.app)
+        </p>
+        <p style={{ marginTop: 12 }}>
+          <Link href="/" style={{ color: '#111827' }}>
+            ← Back to FilePay
+          </Link>
+        </p>
+      </main>
+    )
+  }
+
+  // ✅ ABSOLUTE URL (server fetch requires absolute)
   const apiUrl =
-    `/api/admin/cleanup-expired` +
+    `${base}/api/admin/cleanup-expired` +
     `?token=${encodeURIComponent(token)}` +
     `&dry_run=1` +
     `&limit=${limit}` +
@@ -123,6 +145,9 @@ export default async function Page(props: { searchParams?: any }) {
       <main style={{ padding: 24, fontFamily: 'system-ui', maxWidth: 900 }}>
         <h1>Preview failed</h1>
         <p style={{ color: '#b91c1c' }}>{serverError}</p>
+        <pre style={{ marginTop: 12, fontSize: 12, opacity: 0.75, whiteSpace: 'pre-wrap' }}>
+          debug apiUrl: {apiUrl}
+        </pre>
         <p style={{ marginTop: 12 }}>
           <Link href="/" style={{ color: '#111827' }}>
             ← Back to FilePay
@@ -134,12 +159,10 @@ export default async function Page(props: { searchParams?: any }) {
 
   const found = Number(preview?.found || 0)
 
-  // ✅ URLs para navegación
   const baseUrl = `/admin/cleanup-expired?token=${encodeURIComponent(token)}&limit=${limit}`
   const safeUrl = baseUrl
   const riskyUrl = `${baseUrl}&include_not_marked=1`
 
-  // ✅ Real delete endpoint (NOT dry-run)
   const actionUrl =
     `/api/admin/cleanup-expired?token=${encodeURIComponent(token)}` +
     `&limit=${limit}` +
@@ -211,15 +234,7 @@ export default async function Page(props: { searchParams?: any }) {
         </div>
       </div>
 
-      <div
-        style={{
-          marginTop: 18,
-          padding: 14,
-          borderRadius: 12,
-          border: '1px solid #fee2e2',
-          background: '#fff1f2',
-        }}
-      >
+      <div style={{ marginTop: 18, padding: 14, borderRadius: 12, border: '1px solid #fee2e2', background: '#fff1f2' }}>
         <h3 style={{ margin: 0 }}>Confirm delete</h3>
         <p style={{ marginTop: 8, marginBottom: 12 }}>
           If you continue, FilePay will attempt to delete expired files from <b>Supabase Storage</b> and then remove rows
@@ -264,16 +279,6 @@ export default async function Page(props: { searchParams?: any }) {
           Tip: Use safer mode first. If everything looks right, switch to “include not soft-deleted”.
         </p>
       </div>
-
-      {/* (Opcional) mini debug de fallas */}
-      {Array.isArray(preview?.failures) && preview!.failures!.length > 0 && (
-        <div style={{ marginTop: 18, padding: 12, borderRadius: 12, border: '1px solid #e5e7eb' }}>
-          <div style={{ fontWeight: 900, marginBottom: 8 }}>Failures (preview)</div>
-          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.45 }}>
-            {preview!.failures!.slice(0, 20).map((f, i) => `${i + 1}. ${f.code} · ${f.file_path} · ${f.error}`).join('\n')}
-          </pre>
-        </div>
-      )}
     </main>
   )
 }
