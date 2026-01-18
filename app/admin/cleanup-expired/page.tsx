@@ -1,39 +1,35 @@
 // app/admin/cleanup-expired/page.tsx
-import { verifyAdminActionToken } from '@/lib/admin-action'
-import { supabaseAdmin } from '@/lib/supabase-admin'
+import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-type Row = {
-  code: string
-  expires_at: string | null
-  file_bytes: string | number | null // bigint suele venir como string
-  file_path: string | null
-  paid: boolean | null
-  deleted_at: string | null
-  storage_deleted: boolean | null
+type ApiPayload = {
+  ok?: boolean
+  error?: string
+
+  dryRun?: boolean
+  via?: string
+  mode?: string
+  limit?: number
+
+  found?: number
+  totalBytesFound?: number
+  totalBytesFoundHuman?: string
+
+  softDeleted?: number
+  deletedFromStorage?: number
+  deletedRows?: number
+  failed?: number
+
+  failures?: Array<{ code: string; file_path: string; error: string }>
 }
 
-function toInt(v: unknown): number {
-  if (typeof v === 'number') return Number.isFinite(v) ? Math.floor(v) : 0
-  if (typeof v === 'bigint') return Number(v)
-  if (typeof v === 'string') {
-    const n = parseInt(v, 10)
-    return Number.isFinite(n) ? n : 0
-  }
-  return 0
-}
-
-function bytesToHuman(n: number) {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let v = n
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return `${v.toFixed(i === 0 ? 0 : 2)} ${units[i]}`
+function getSiteUrl() {
+  const s = (process.env.NEXT_PUBLIC_SITE_URL || '').trim()
+  if (s) return s.replace(/\/+$/, '')
+  // local fallback (dev)
+  return 'http://localhost:3000'
 }
 
 export default async function Page({
@@ -42,59 +38,100 @@ export default async function Page({
   searchParams: { token?: string; include_not_marked?: string; limit?: string }
 }) {
   const token = (searchParams.token || '').trim()
-  const ok = token && verifyAdminActionToken(token)
+  const includeNotMarked = searchParams.include_not_marked === '1'
+  const limit = (() => {
+    const n = Number(searchParams.limit || '200')
+    if (!Number.isFinite(n)) return 200
+    return Math.min(Math.max(Math.floor(n), 1), 500)
+  })()
 
-  if (!ok) {
+  if (!token) {
+    return (
+      <main style={{ padding: 24, fontFamily: 'system-ui' }}>
+        <h1>Unauthorized</h1>
+        <p>Missing token.</p>
+        <p style={{ opacity: 0.7, fontSize: 12 }}>Open the latest email report again.</p>
+        <p style={{ marginTop: 12 }}>
+          <Link href="/" style={{ color: '#111827' }}>
+            ← Back to FilePay
+          </Link>
+        </p>
+      </main>
+    )
+  }
+
+  const siteUrl = getSiteUrl()
+
+  // ✅ Dry-run preview using the API (the API is the source of truth for auth)
+  const apiUrl =
+    `${siteUrl}/api/admin/cleanup-expired` +
+    `?token=${encodeURIComponent(token)}` +
+    `&dry_run=1` +
+    `&limit=${limit}` +
+    (includeNotMarked ? `&include_not_marked=1` : ``)
+
+  let preview: ApiPayload | null = null
+  let unauthorized = false
+  let serverError: string | null = null
+
+  try {
+    const res = await fetch(apiUrl, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+    })
+
+    if (res.status === 401) {
+      unauthorized = true
+    } else {
+      const json = (await res.json().catch(() => ({}))) as ApiPayload
+      preview = json
+      if (!res.ok) serverError = json?.error || `API error (${res.status})`
+    }
+  } catch (e: any) {
+    serverError = e?.message || 'Failed to reach API.'
+  }
+
+  if (unauthorized) {
     return (
       <main style={{ padding: 24, fontFamily: 'system-ui' }}>
         <h1>Unauthorized</h1>
         <p>This link is invalid or expired.</p>
+        <p style={{ opacity: 0.7, fontSize: 12 }}>Open the latest email report again.</p>
+        <p style={{ marginTop: 12 }}>
+          <Link href="/" style={{ color: '#111827' }}>
+            ← Back to FilePay
+          </Link>
+        </p>
       </main>
     )
   }
 
-  const includeNotMarked = searchParams.include_not_marked === '1'
-  const limitRaw = Number(searchParams.limit || '200')
-  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 200
-
-  const nowIso = new Date().toISOString()
-
-  // --- DRY RUN / PREVIEW (no borra nada) ---
-  let q = supabaseAdmin
-    .from('file_links')
-    .select('code,expires_at,file_bytes,file_path,paid,deleted_at,storage_deleted')
-    .lte('expires_at', nowIso)
-    .order('expires_at', { ascending: true })
-    .limit(limit)
-
-  // modo seguro: solo los que YA fueron soft-deleted (deleted_at NOT NULL)
-  if (!includeNotMarked) {
-    q = q.not('deleted_at', 'is', null)
-  }
-
-  const { data, error } = await q
-  if (error) {
+  if (serverError) {
     return (
       <main style={{ padding: 24, fontFamily: 'system-ui', maxWidth: 900 }}>
         <h1>Preview failed</h1>
-        <p style={{ color: '#b91c1c' }}>{error.message}</p>
+        <p style={{ color: '#b91c1c' }}>{serverError}</p>
+        <p style={{ marginTop: 12 }}>
+          <Link href="/" style={{ color: '#111827' }}>
+            ← Back to FilePay
+          </Link>
+        </p>
       </main>
     )
   }
 
-  const rows = (data ?? []) as Row[]
-  const found = rows.length
-  const totalBytesFound = rows.reduce((acc, r) => acc + toInt(r.file_bytes), 0)
-  const softDeletedCount = rows.reduce((acc, r) => acc + (r.deleted_at ? 1 : 0), 0)
-  const alreadyStorageDeletedCount = rows.reduce((acc, r) => acc + (r.storage_deleted ? 1 : 0), 0)
+  const found = Number(preview?.found || 0)
 
-  const baseUrl = `/admin/cleanup-expired?token=${encodeURIComponent(token)}`
-  const safeUrl = baseUrl // include_not_marked off
+  const baseUrl = `/admin/cleanup-expired?token=${encodeURIComponent(token)}&limit=${limit}`
+  const safeUrl = baseUrl
   const toggleUrl = includeNotMarked ? safeUrl : `${baseUrl}&include_not_marked=1`
-  const limitUrl = `${baseUrl}${includeNotMarked ? '&include_not_marked=1' : ''}&limit=${limit}`
 
-  // ✅ API endpoint SIN token en query — lo mandamos en el POST body (más seguro/limpio)
-  const actionUrl = `/api/admin/cleanup-expired`
+  // ✅ Real delete endpoint (NOT dry-run)
+  const actionUrl =
+    `/api/admin/cleanup-expired?token=${encodeURIComponent(token)}` +
+    `&limit=${limit}` +
+    (includeNotMarked ? `&include_not_marked=1` : ``)
 
   return (
     <main style={{ padding: 24, fontFamily: 'system-ui', maxWidth: 900 }}>
@@ -114,26 +151,19 @@ export default async function Page({
       >
         <div style={{ display: 'grid', gap: 6 }}>
           <div>
+            <b>Authorized via:</b> {preview?.via || 'unknown'}
+          </div>
+          <div>
             <b>Mode:</b>{' '}
-            {includeNotMarked
-              ? 'expired_any (includes not soft-deleted)'
-              : 'expired_soft_deleted_only (safer)'}
+            {includeNotMarked ? 'expired_any (includes not soft-deleted)' : 'expired_soft_deleted_only (safer)'}
           </div>
           <div>
             <b>Found:</b> {found}
           </div>
           <div>
-            <b>Total size:</b> {bytesToHuman(totalBytesFound)}
+            <b>Total size:</b> {preview?.totalBytesFoundHuman || '0 B'}
           </div>
-          <div>
-            <b>Soft-deleted in DB:</b> {softDeletedCount}
-          </div>
-          <div>
-            <b>Already marked storage_deleted:</b> {alreadyStorageDeletedCount}
-          </div>
-          <div style={{ fontSize: 12, opacity: 0.75 }}>
-            Limit: {limit} (you can change it via <code>&limit=</code>)
-          </div>
+          <div style={{ fontSize: 12, opacity: 0.75 }}>Limit: {limit}</div>
         </div>
 
         <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -153,7 +183,7 @@ export default async function Page({
           </a>
 
           <a
-            href={limitUrl}
+            href={includeNotMarked ? toggleUrl : safeUrl}
             style={{
               padding: '8px 12px',
               borderRadius: 10,
@@ -169,59 +199,14 @@ export default async function Page({
         </div>
       </div>
 
-      <h2 style={{ marginTop: 18 }}>Top expired (preview)</h2>
-
-      {found === 0 ? (
-        <div style={{ marginTop: 8, padding: 12, borderRadius: 12, border: '1px solid #e5e7eb' }}>
-          ✅ Nothing to delete right now.
-        </div>
-      ) : (
-        <div style={{ marginTop: 8, padding: 12, borderRadius: 12, border: '1px solid #e5e7eb' }}>
-          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>
-            Showing up to {limit} rows. (This is only a preview.)
-          </div>
-
-          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.45 }}>
-            {rows
-              .slice(0, Math.min(rows.length, limit))
-              .map((r) => {
-                const b = toInt(r.file_bytes)
-                return `${r.code} · exp ${r.expires_at} · ${bytesToHuman(b)} · paid=${String(
-                  r.paid
-                )} · deleted_at=${r.deleted_at ? 'yes' : 'no'} · storage_deleted=${String(!!r.storage_deleted)}`
-              })
-              .join('\n')}
-          </pre>
-        </div>
-      )}
-
-      {/* CONFIRM */}
-      <div
-        style={{
-          marginTop: 18,
-          padding: 14,
-          borderRadius: 12,
-          border: '1px solid #fee2e2',
-          background: '#fff1f2',
-        }}
-      >
+      <div style={{ marginTop: 18, padding: 14, borderRadius: 12, border: '1px solid #fee2e2', background: '#fff1f2' }}>
         <h3 style={{ margin: 0 }}>Confirm delete</h3>
         <p style={{ marginTop: 8, marginBottom: 12 }}>
-          If you continue, FilePay will attempt to delete the expired files from <b>Supabase Storage</b> and then remove rows
-          from the <b>file_links</b> table (only where <code>storage_deleted=true</code>).
+          If you continue, FilePay will attempt to delete expired files from <b>Supabase Storage</b> and then remove rows
+          from <b>file_links</b> (only after <code>storage_deleted=true</code>).
         </p>
 
-        <form
-          action={actionUrl}
-          method="POST"
-          style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}
-        >
-          {/* ✅ mandamos todo por body */}
-          <input type="hidden" name="token" value={token} />
-          <input type="hidden" name="include_not_marked" value={includeNotMarked ? '1' : '0'} />
-          <input type="hidden" name="limit" value={String(limit)} />
-          <input type="hidden" name="dryRun" value="0" />
-
+        <form action={actionUrl} method="POST" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <button
             type="submit"
             style={{
@@ -238,7 +223,7 @@ export default async function Page({
             Delete expired now
           </button>
 
-          <a
+          <Link
             href="/"
             style={{
               padding: '10px 14px',
@@ -251,11 +236,11 @@ export default async function Page({
             }}
           >
             Cancel
-          </a>
+          </Link>
         </form>
 
         <p style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-          Tip: Use safer mode first (only soft-deleted). If everything looks right, you can switch to “include not soft-deleted”.
+          Tip: Use safer mode first. If everything looks right, switch to “include not soft-deleted”.
         </p>
       </div>
     </main>
