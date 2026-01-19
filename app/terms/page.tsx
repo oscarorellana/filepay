@@ -178,7 +178,7 @@ export default function TermsPage() {
 
           <SectionTitle>13. Contact</SectionTitle>
           <Muted>
-            Questions or reports of abuse can be sent to: <b style={{ color: 'white' }}>{process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'support@yourdomain.com'}</b>
+            Questions or reports of abuse can be sent to: <b style={{ color: 'white' }}>{process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'info@filepay.com'}</b>
           </Muted>
 
           <div style={styles.footerRow}>

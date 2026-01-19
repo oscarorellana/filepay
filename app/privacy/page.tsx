@@ -82,7 +82,7 @@ function TableRow({ k, v }: { k: string; v: React.ReactNode }) {
 
 export default function PrivacyPage() {
   const updated = 'January 2026'
-  const support = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'support@yourdomain.com'
+  const support = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'info@filepay.com'
 
   return (
     <main style={styles.page}>
