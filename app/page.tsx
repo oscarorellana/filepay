@@ -589,24 +589,33 @@ const PRICE_BY_DAYS: Record<number, number> = {
 
                     <div style={styles.field}>
   {/* Legal acceptance */}
+  <div
+  style={{
+    display: 'flex',
+    gap: 10,
+    alignItems: 'flex-start',
+    marginTop: 14,
+  }}
+>
+  <input
+    type="checkbox"
+    checked={accepted}
+    onChange={(e) => setAccepted(e.target.checked)}
+    style={{ marginTop: 4 }}
+  />
+
   <label
     style={{
-      display: 'flex',
-      gap: 8,
-      fontSize: 13,
+      fontSize: 14,
+      lineHeight: 1.45,
+      color: '#111827',
       cursor: 'pointer',
-      lineHeight: 1.35,
-      opacity: 0.85,
     }}
   >
-    <input
-      type="checkbox"
-      checked={accepted}
-      onChange={(e) => setAccepted(e.target.checked)}
-    />
-    I confirm that I have the legal right to upload and share this file and agree
-    to the Terms & Acceptable Use Policy.
+    I confirm that I have the legal right to upload and share this file, and that it does not
+    violate any laws, copyrights, or third-party rights.
   </label>
+</div>
 
   <div style={styles.label}>Action</div>
 
