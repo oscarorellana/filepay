@@ -591,7 +591,7 @@
                       </div>
                     </div>
 
-                   <div style={styles.field}>
+                    <div style={styles.field}>
   {/* Legal acceptance */}
   <label
     style={{
@@ -634,6 +634,7 @@
     </div>
   )}
 </div>
+                  </div>
 
                   <div style={styles.previewWrap}>
                     <div style={styles.previewHeader}>
@@ -655,7 +656,6 @@
 
                   {status && <div style={styles.statusBox}>{status}</div>}
                 </div>
-              </div>
               </section>
 
               <aside style={styles.sideCard}>
