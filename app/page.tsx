@@ -1,28 +1,23 @@
-    'use client'
+'use client'
 
-    import { useEffect, useMemo, useRef, useState } from 'react'
-    import type { CSSProperties, DragEvent } from 'react'
-    import { createClient } from '@supabase/supabase-js'
-    const [accepted, setAccepted] = useState(false)
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    )
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, DragEvent } from 'react'
+import { createClient } from '@supabase/supabase-js'
 
-    const DAY_OPTIONS = [1, 3, 7, 14, 30]
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
-    /**
-    * UI price map (USD)
-    * Make sure /api/checkout uses the same mapping.
-    */
-    const PRICE_BY_DAYS: Record<number, number> = {
-      1: 1,
-      3: 2,
-      7: 3,
-      14: 5,
-      30: 8,
-    }
+const DAY_OPTIONS = [1, 3, 7, 14, 30]
 
+const PRICE_BY_DAYS: Record<number, number> = {
+  1: 1,
+  3: 2,
+  7: 3,
+  14: 5,
+  30: 8,
+}
     function useIsMobile(bp = 900) {
       const [isMobile, setIsMobile] = useState(false)
 
@@ -102,10 +97,11 @@
 
       const [busy, setBusy] = useState(false)
       const [status, setStatus] = useState<string>('')
-
+      const [accepted, setAccepted] = useState(false)
+      
       const priceUsd = useMemo(() => PRICE_BY_DAYS[days] ?? 5, [days])
       const priceLabel = useMemo(() => `$${priceUsd}`, [priceUsd])
-
+      
       const fileMeta = useMemo(() => {
         if (!file) return null
         return {
