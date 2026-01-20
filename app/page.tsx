@@ -117,6 +117,8 @@ const PRICE_BY_DAYS: Record<number, number> = {
       const [status, setStatus] = useState<string>('')
       const [accepted, setAccepted] = useState(false)
       
+      const canGenerate = !!file && accepted && !busy
+
       const priceUsd = useMemo(() => PRICE_BY_DAYS[days] ?? 5, [days])
       const priceLabel = useMemo(() => `$${priceUsd}`, [priceUsd])
       
@@ -680,25 +682,36 @@ const PRICE_BY_DAYS: Record<number, number> = {
 </div>
   <div style={styles.label}>Action</div>
 
-  <button
-    type="button"
-    onClick={handleCreateLink}
-    disabled={busy || !file || !accepted}
-    style={{
-      ...styles.primaryBtn,
-      opacity: busy || !file || !accepted ? 0.6 : 1,
-      cursor: busy || !file || !accepted ? 'not-allowed' : 'pointer',
-      width: '100%',
-    }}
-  >
-    {primaryLabel}
-  </button>
+<button
+  type="button"
+  onClick={handleCreateLink}
+  disabled={!canGenerate}
+  title={
+    !file
+      ? 'Select a file first'
+      : !accepted
+      ? 'Please accept the Terms & Privacy to continue'
+      : busy
+      ? 'Working...'
+      : ''
+  }
+  style={{
+    ...styles.primaryBtn,
+    opacity: canGenerate ? 1 : 0.6,
+    cursor: canGenerate ? 'pointer' : 'not-allowed',
+    width: '100%',
+  }}
+>
+  {primaryLabel}
+</button>
 
-  {!accepted && (
-    <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
-      You must accept the terms before generating a link.
-    </div>
-  )}
+{!accepted && file && (
+  <div style={{ marginTop: 8, fontSize: 13, opacity: 0.85 }}>
+    To generate a link, please accept{' '}
+    <a href="/terms" target="_blank" rel="noreferrer">Terms</a> &{' '}
+    <a href="/privacy" target="_blank" rel="noreferrer">Privacy</a>.
+  </div>
+)}
 </div>
                   </div>
 
