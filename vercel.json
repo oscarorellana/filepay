@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/cron/storage-report",
+      "path": "/api/cron/storage-report?secret=beb6e41f561e2947ee4c0582ac3c6042f43717e304005f76f6cf07b32642f163",
       "schedule": "0 14 * * *"
     }
   ]
