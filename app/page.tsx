@@ -1,5 +1,6 @@
 'use client'
 
+
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, DragEvent } from 'react'
 import { createClient } from '@supabase/supabase-js'
@@ -16,7 +17,6 @@ const BLOCKED_EXT = new Set([
   'exe','msi','dmg','pkg','bat','cmd','ps1','sh',
   'vbs','js','jar','lnk','scr','iso'
 ])
-const [accepted, setAccepted] = useState(false)
 
 function getExt(name: string) {
   const parts = name.toLowerCase().split('.')
@@ -101,7 +101,7 @@ const PRICE_BY_DAYS: Record<number, number> = {
 
       const [userId, setUserId] = useState<string | null>(null)
       const [userEmail, setUserEmail] = useState<string | null>(null)
-
+      
       const [isPro, setIsPro] = useState(false)
       const [proCancelAtPeriodEnd, setProCancelAtPeriodEnd] = useState<boolean>(false)
       const [proEndsAt, setProEndsAt] = useState<string | null>(null)
@@ -116,6 +116,7 @@ const PRICE_BY_DAYS: Record<number, number> = {
 
       const [busy, setBusy] = useState(false)
       const [status, setStatus] = useState<string>('')
+      // ✅ AQUÍ va esto
       const [accepted, setAccepted] = useState(false)
       
       const canGenerate = !!file && accepted && !busy
