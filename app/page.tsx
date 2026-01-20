@@ -16,6 +16,7 @@ const BLOCKED_EXT = new Set([
   'exe','msi','dmg','pkg','bat','cmd','ps1','sh',
   'vbs','js','jar','lnk','scr','iso'
 ])
+const [accepted, setAccepted] = useState(false)
 
 function getExt(name: string) {
   const parts = name.toLowerCase().split('.')

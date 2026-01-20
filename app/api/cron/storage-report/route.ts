@@ -17,11 +17,17 @@ function requireCronSecret(req: Request) {
   const expected = (process.env.CRON_SECRET || '').trim()
   if (!expected) return false
 
-  // Vercel Cron: Authorization: Bearer <secret>
+  const url = new URL(req.url)
+
+  // 1) Querystring (para Vercel cron sin headers)
+  const qs = (url.searchParams.get('secret') || '').trim()
+  if (qs && qs === expected) return true
+
+  // 2) Header Authorization: Bearer <secret>
   const auth = (req.headers.get('authorization') || '').trim()
   if (auth === `Bearer ${expected}`) return true
 
-  // Manual/legacy: x-cron-secret: <secret>
+  // 3) Header legacy x-cron-secret
   const legacy = (req.headers.get('x-cron-secret') || '').trim()
   if (legacy === expected) return true
 
