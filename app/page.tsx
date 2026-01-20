@@ -308,6 +308,9 @@ const PRICE_BY_DAYS: Record<number, number> = {
           file_bytes: fileBytes,
           days,
           created_by_user_id: userId,
+          accepted,
+          tos_version: '2026-01-18',
+          privacy_version: '2026-01-18',
         }),
       })
 
@@ -591,48 +594,33 @@ const PRICE_BY_DAYS: Record<number, number> = {
   {/* Legal acceptance */}
 <div style={{ marginTop: 14 }}>
   <label
-    style={{
-      display: 'flex',
-      alignItems: 'flex-start',
-      gap: 10,
-      fontSize: 14,
-      lineHeight: 1.4,
-      color: '#e5e7eb', // 👈 TEXTO CLARO (clave)
-      cursor: 'pointer',
-    }}
-  >
-    <input
-      type="checkbox"
-      checked={accepted}
-      onChange={(e) => setAccepted(e.target.checked)}
-      style={{
-        marginTop: 3,
-        accentColor: '#6366f1', // 👈 checkbox bonito (opcional)
-        cursor: 'pointer',
-      }}
-    />
+  style={{
+    display: 'flex',
+    gap: 8,
+    alignItems: 'flex-start',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.85)', // 👈 importante para fondo oscuro
+    lineHeight: 1.4,
+  }}
+>
+  <input
+    type="checkbox"
+    checked={accepted}
+    onChange={(e) => setAccepted(e.target.checked)}
+    style={{ marginTop: 3 }}
+  />
 
-    <span>
-      I confirm that I have the right to share this file and that it does not contain
-      illegal content, malware, or copyrighted material without permission. I agree to
-      the{' '}
-      <a
-        href="/terms"
-        target="_blank"
-        style={{ color: '#93c5fd', textDecoration: 'underline' }}
-      >
-        Terms of Service
-      </a>{' '}
-      and{' '}
-      <a
-        href="/privacy"
-        target="_blank"
-        style={{ color: '#93c5fd', textDecoration: 'underline' }}
-      >
-        Privacy Policy
-      </a>.
-    </span>
-  </label>
+  <span>
+    I agree to the{' '}
+    <a href="/terms" target="_blank" style={{ color: '#93c5fd', textDecoration: 'underline' }}>
+      Terms of Service
+    </a>{' '}
+    and{' '}
+    <a href="/privacy" target="_blank" style={{ color: '#93c5fd', textDecoration: 'underline' }}>
+      Privacy Policy
+    </a>
+  </span>
+</label>
 </div>
   <div style={styles.label}>Action</div>
 
