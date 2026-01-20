@@ -9,6 +9,24 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
+const MAX_BYTES_LOGGED = 2 * 1024 * 1024 * 1024 // 2GB
+const MAX_BYTES_ANON = 500 * 1024 * 1024 // 500MB
+
+const BLOCKED_EXT = new Set([
+  'exe','msi','dmg','pkg','bat','cmd','ps1','sh',
+  'vbs','js','jar','lnk','scr','iso'
+])
+
+function getExt(name: string) {
+  const parts = name.toLowerCase().split('.')
+  return parts.length > 1 ? parts.pop()! : ''
+}
+
+function isBlockedFile(f: File) {
+  const ext = getExt(f.name)
+  return ext ? BLOCKED_EXT.has(ext) : false
+}
+
 const DAY_OPTIONS = [1, 3, 7, 14, 30]
 
 const PRICE_BY_DAYS: Record<number, number> = {
@@ -226,19 +244,37 @@ const PRICE_BY_DAYS: Record<number, number> = {
       }, [previewUrl])
 
       function setPickedFile(f: File | null) {
-        setStatus('')
-        setFile(f)
+  setStatus('')
 
-        if (previewUrl) URL.revokeObjectURL(previewUrl)
+  if (!f) {
+    setFile(null)
+    setPreviewUrl(null)
+    return
+  }
 
-        if (!f) {
-          setPreviewUrl(null)
-          return
-        }
+  const maxBytes = userId ? MAX_BYTES_LOGGED : MAX_BYTES_ANON
 
-        if (f.type.startsWith('image/')) setPreviewUrl(URL.createObjectURL(f))
-        else setPreviewUrl(null)
-      }
+  if (isBlockedFile(f)) {
+    setStatus('This file type is not allowed for safety reasons.')
+    setFile(null)
+    setPreviewUrl(null)
+    return
+  }
+
+  if (f.size > maxBytes) {
+    setStatus(
+      `File too large. Max size is ${prettyBytes(maxBytes)}.`
+    )
+    setFile(null)
+    setPreviewUrl(null)
+    return
+  }
+
+  setFile(f)
+  if (previewUrl) URL.revokeObjectURL(previewUrl)
+  if (f.type.startsWith('image/')) setPreviewUrl(URL.createObjectURL(f))
+  else setPreviewUrl(null)
+}
 
       function openFilePicker() {
         fileInputRef.current?.click()
@@ -336,29 +372,49 @@ const PRICE_BY_DAYS: Record<number, number> = {
       }
 
       async function handleCreateLink() {
-        setStatus('')
-        if (!file) {
-          setStatus('Please select a file first.')
-          return
-        }
+  setStatus('')
 
-        setBusy(true)
-        try {
-          setStatus('Uploading…')
-          const path = await uploadToSupabase(file)
+  if (!file) {
+    setStatus('Please select a file first.')
+    return
+  }
 
-          setStatus('Creating link…')
-          const meta = await createLink(path, file?.size ?? null)
-          const code = meta.code
+  // 🔒 Seguridad: tamaño máximo
+  const maxBytes = userId ? MAX_BYTES_LOGGED : MAX_BYTES_ANON
+  if (file.size > maxBytes) {
+    setStatus(`File too large. Max size is ${prettyBytes(maxBytes)}.`)
+    return
+  }
 
-          setStatus(isPro ? 'Finalizing…' : 'Redirecting to payment…')
-          await goPayOrProBypass(code)
-        } catch (e: any) {
-          setStatus(e?.message ?? 'Something went wrong.')
-          setBusy(false)
-        }
-      }
+  // 🔒 Seguridad: tipos bloqueados (ISO, exe, etc.)
+  if (isBlockedFile(file)) {
+    setStatus('This file type is not allowed for safety reasons.')
+    return
+  }
 
+  // 🔒 Aceptación de términos
+  if (!accepted) {
+    setStatus('You must accept the Terms of Service to continue.')
+    return
+  }
+
+  setBusy(true)
+
+  try {
+    setStatus('Uploading…')
+    const path = await uploadToSupabase(file)
+
+    setStatus('Creating link…')
+    const meta = await createLink(path, file.size)
+    const code = meta.code
+
+    setStatus(isPro ? 'Finalizing…' : 'Redirecting to payment…')
+    await goPayOrProBypass(code)
+  } catch (e: any) {
+    setStatus(e?.message ?? 'Something went wrong.')
+    setBusy(false)
+  }
+}
       const primaryLabel = busy ? 'Working…' : isPro ? 'Generate link (Pro)' : `Pay ${priceLabel} & generate link`
 
       // ✅ typed styles (fix TS complaining about computed styles)

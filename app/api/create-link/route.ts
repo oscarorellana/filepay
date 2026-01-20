@@ -15,15 +15,47 @@ type CreateLinkBody = {
   privacy_version?: unknown
 }
 
+/** ===== Limits / Policy ===== */
+const MAX_BYTES = 2 * 1024 * 1024 * 1024 // 2GB
+
+// Block high-risk / executable formats (+ ISO por ahora)
+const BLOCKED_EXT = new Set([
+  'exe',
+  'dll',
+  'msi',
+  'bat',
+  'cmd',
+  'ps1',
+  'vbs',
+  'js',
+  'jar',
+  'lnk',
+  'scr',
+  'com',
+  'apk',
+  'dmg',
+  'pkg',
+  'sh',
+  'iso',
+])
+
+function extFromPath(p: string): string {
+  const clean = p.split('?')[0].split('#')[0]
+  const last = clean.split('/').pop() || ''
+  const dot = last.lastIndexOf('.')
+  if (dot === -1) return ''
+  return last.slice(dot + 1).toLowerCase()
+}
+
 function makeCode(length = 8): string {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // avoid 0/O/1/I
   let out = ''
   for (let i = 0; i < length; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)]
   return out
 }
 
-// bigint suele venir string desde Supabase, pero aquí sólo parseamos input
-function toInt(v: unknown): number | null {
+// input parsing (safe for <= 2GB)
+function toPositiveInt(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v) && v > 0) return Math.floor(v)
   if (typeof v === 'string') {
     const n = Number(v)
@@ -33,7 +65,6 @@ function toInt(v: unknown): number | null {
 }
 
 function getClientIp(req: Request) {
-  // Vercel / proxies
   const xff = req.headers.get('x-forwarded-for') || ''
   const ip = xff.split(',')[0]?.trim()
   return ip || req.headers.get('x-real-ip') || ''
@@ -43,28 +74,22 @@ function getUserAgent(req: Request) {
   return (req.headers.get('user-agent') || '').slice(0, 300)
 }
 
-function getExt(filePath: string) {
-  const s = filePath.toLowerCase()
-  const i = s.lastIndexOf('.')
-  return i >= 0 ? s.slice(i + 1) : ''
-}
-
-// Reglas simples (opción 1 “rápida”)
+/**
+ * Optional: “flag” rules (does NOT block, only marks)
+ * - You can expand later (virus scan, content hashing, etc.)
+ */
 function flagRules(filePath: string, fileBytes: number | null) {
-  const ext = getExt(filePath)
+  const ext = extFromPath(filePath)
 
-  const blockedExt = new Set([
-    'exe','dll','msi','bat','cmd','ps1','vbs','js','jar','scr','com','apk','dmg','pkg'
-  ])
-
-  if (blockedExt.has(ext)) {
-    return { flagged: true, reason: `blocked_extension:${ext}` }
+  // Example: flag very large videos even if allowed (but still under MAX_BYTES)
+  const SOFT_FLAG_BYTES = 800 * 1024 * 1024 // 800MB
+  if (typeof fileBytes === 'number' && fileBytes > SOFT_FLAG_BYTES) {
+    return { flagged: true, reason: `large_file:${fileBytes}` }
   }
 
-  // tamaño (ajusta a tu gusto)
-  const MAX_BYTES = 200 * 1024 * 1024 // 200MB
-  if (typeof fileBytes === 'number' && fileBytes > MAX_BYTES) {
-    return { flagged: true, reason: `too_large:${fileBytes}` }
+  // Example: flag unknown extension (optional)
+  if (!ext) {
+    return { flagged: true, reason: 'missing_extension' }
   }
 
   return { flagged: false, reason: '' }
@@ -80,6 +105,8 @@ async function audit(event: {
   user_agent?: string
   meta?: Record<string, any>
 }) {
+  // If audit table doesn’t exist, this would throw.
+  // If you want it “non-blocking”, wrap the insert in try/catch.
   await supabaseAdmin.from('audit_events').insert({
     event_type: event.event_type,
     code: event.code ?? null,
@@ -100,18 +127,50 @@ export async function POST(req: Request) {
     const userAgent = getUserAgent(req)
 
     const file_path = typeof body.file_path === 'string' ? body.file_path.trim() : ''
-    if (!file_path) return NextResponse.json({ error: 'Missing file_path' }, { status: 400 })
+    if (!file_path) {
+      return NextResponse.json({ error: 'Missing file_path' }, { status: 400 })
+    }
 
-    const daysNum = toInt(body.days) ?? 14
+    // ✅ parse file_bytes BEFORE using it
+    const file_bytes = toPositiveInt(body.file_bytes) // null if missing/invalid
+
+    // ✅ hard block by extension
+    const ext = extFromPath(file_path)
+    if (ext && BLOCKED_EXT.has(ext)) {
+      await audit({
+        event_type: 'link_create_denied_blocked_ext',
+        file_path,
+        file_bytes,
+        user_id: typeof body.created_by_user_id === 'string' ? body.created_by_user_id.trim() : null,
+        ip,
+        user_agent: userAgent,
+        meta: { ext },
+      })
+      return NextResponse.json({ error: 'File type not allowed' }, { status: 400 })
+    }
+
+    // ✅ hard block by size
+    if (file_bytes !== null && file_bytes > MAX_BYTES) {
+      await audit({
+        event_type: 'link_create_denied_too_large',
+        file_path,
+        file_bytes,
+        user_id: typeof body.created_by_user_id === 'string' ? body.created_by_user_id.trim() : null,
+        ip,
+        user_agent: userAgent,
+      })
+      return NextResponse.json({ error: 'File too large (max 2 GB)' }, { status: 400 })
+    }
+
+    const daysNum = toPositiveInt(body.days) ?? 14
     const safeDays = [1, 3, 7, 14, 30].includes(daysNum) ? daysNum : 14
 
-    const file_bytes = toInt(body.file_bytes) // null si no viene
     const created_by_user_id =
       typeof body.created_by_user_id === 'string' && body.created_by_user_id.trim()
         ? body.created_by_user_id.trim()
         : null
 
-    // ✅ aceptación obligatoria (si quieres hacerlo obligatorio)
+    // ✅ acceptance required
     const accepted = body.accepted === true
     if (!accepted) {
       await audit({
@@ -130,13 +189,31 @@ export async function POST(req: Request) {
 
     const expires_at = new Date(Date.now() + safeDays * 24 * 60 * 60 * 1000).toISOString()
 
-    // flags
+    // optional flags (just marks, does not block)
     const rule = flagRules(file_path, file_bytes)
 
-    // code único
+    // code unique (up to 10 tries)
     let code = makeCode(8)
     for (let i = 0; i < 10; i++) {
-      const { data } = await supabaseAdmin.from('file_links').select('code').eq('code', code).maybeSingle()
+      const { data, error } = await supabaseAdmin
+        .from('file_links')
+        .select('code')
+        .eq('code', code)
+        .maybeSingle()
+
+      if (error) {
+        await audit({
+          event_type: 'link_create_failed_uniqueness_check',
+          file_path,
+          file_bytes,
+          user_id: created_by_user_id,
+          ip,
+          user_agent: userAgent,
+          meta: { error: error.message },
+        })
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+
       if (!data) break
       code = makeCode(8)
     }
@@ -150,12 +227,14 @@ export async function POST(req: Request) {
       expires_at,
       file_bytes,
 
+      // acceptance/audit fields (requires columns)
       accepted_at: nowIso,
       accepted_ip: ip || null,
       accepted_user_agent: userAgent || null,
       tos_version,
       privacy_version,
 
+      // flags (requires columns)
       flagged: rule.flagged,
       flag_reason: rule.flagged ? rule.reason : null,
       flagged_at: rule.flagged ? nowIso : null,
@@ -166,7 +245,7 @@ export async function POST(req: Request) {
     const { error: insErr } = await supabaseAdmin.from('file_links').insert(insertPayload)
     if (insErr) {
       await audit({
-        event_type: 'link_create_failed',
+        event_type: 'link_create_failed_insert',
         file_path,
         file_bytes,
         user_id: created_by_user_id,
@@ -188,17 +267,15 @@ export async function POST(req: Request) {
       meta: { days: safeDays, flagged: rule.flagged, reason: rule.reason },
     })
 
-    // si está flagged, tú decides: ¿bloquear o solo advertir?
-    // opción “segura”: impedir que creen links para extensiones bloqueadas.
-    if (rule.flagged && rule.reason.startsWith('blocked_extension')) {
-      return NextResponse.json(
-        { error: 'This file type is not allowed.' },
-        { status: 400 }
-      )
-    }
-
     return NextResponse.json(
-      { code, expires_at, days: safeDays, file_bytes, flagged: rule.flagged, flag_reason: rule.reason },
+      {
+        code,
+        expires_at,
+        days: safeDays,
+        file_bytes,
+        flagged: rule.flagged,
+        flag_reason: rule.flagged ? rule.reason : null,
+      },
       { status: 200 }
     )
   } catch (err: unknown) {
