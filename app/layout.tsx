@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   alternates: { canonical: '/' },
   
   verification: {
-  google: 'xrkaTXIVZH2qiKaAiuUVwKl6p-JY21RSn_dnaGjheYE',
+  google: 'Jx91reudk_AF16dKo6vGct-8Q6-J-OAFIWzAWdqLHVo',
 },
   icons: {
     icon: '/favicon.ico',
