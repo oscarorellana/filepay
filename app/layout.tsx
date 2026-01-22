@@ -10,6 +10,10 @@ export const metadata: Metadata = {
   applicationName: 'FilePay',
   metadataBase: new URL('https://filepay.vercel.app'),
   alternates: { canonical: '/' },
+  
+  verification: {
+  google: 'xrkaTXIVZH2qiKaAiuUVwKl6p-JY21RSn_dnaGjheYE',
+},
   icons: {
     icon: '/favicon.ico',
     // si luego agregas: public/icon.png / public/apple-icon.png
