@@ -1,14 +1,14 @@
 // app/wetransfer-alternative/page.tsx
+import React from 'react'
 import Link from 'next/link'
 import type { Metadata } from 'next'
+import TrackingCtas from './TrackingCtas'
 
 export const metadata: Metadata = {
   title: 'WeTransfer Alternative for Paid File Sharing | FilePay',
   description:
     'A secure WeTransfer alternative to send large files and get paid. Links expire automatically. No free trials.',
-  alternates: {
-    canonical: '/wetransfer-alternative',
-  },
+  alternates: { canonical: '/wetransfer-alternative' },
   openGraph: {
     title: 'WeTransfer Alternative for Paid File Sharing | FilePay',
     description:
@@ -56,7 +56,13 @@ const S: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     letterSpacing: -0.2,
   },
-  dot: { width: 10, height: 10, borderRadius: 999, background: '#7C5CFF', boxShadow: '0 0 0 3px rgba(124,92,255,0.18)' },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    background: '#7C5CFF',
+    boxShadow: '0 0 0 3px rgba(124,92,255,0.18)',
+  },
   navLinks: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' },
   navLink: {
     color: '#C9D0E1',
@@ -100,31 +106,6 @@ const S: Record<string, React.CSSProperties> = {
     maxWidth: 620,
   },
   ctas: { display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 16 },
-  primary: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    padding: '12px 14px',
-    borderRadius: 14,
-    background: '#7C5CFF',
-    border: '1px solid rgba(255,255,255,0.12)',
-    color: '#070A13',
-    fontWeight: 950,
-    textDecoration: 'none',
-  },
-  secondary: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '12px 14px',
-    borderRadius: 14,
-    background: 'rgba(255,255,255,0.04)',
-    border: '1px solid rgba(255,255,255,0.14)',
-    color: '#E7EAF2',
-    fontWeight: 900,
-    textDecoration: 'none',
-  },
   micro: { marginTop: 12, fontSize: 13, color: '#C9D0E1', opacity: 0.95 },
 
   sideCard: {
@@ -149,11 +130,7 @@ const S: Record<string, React.CSSProperties> = {
 
   section: { marginTop: 30 },
   h2: { margin: '0 0 10px', fontSize: 20, letterSpacing: -0.3 },
-  how: {
-    display: 'grid',
-    gridTemplateColumns: '1fr',
-    gap: 10,
-  },
+  how: { display: 'grid', gridTemplateColumns: '1fr', gap: 10 },
   step: {
     display: 'flex',
     gap: 12,
@@ -246,13 +223,9 @@ export default function Page() {
                 Built as <b>paid-only</b> to reduce abuse and keep the platform reliable.
               </p>
 
+              {/* ✅ Tracked CTAs (Hero) */}
               <div style={S.ctas}>
-                <Link href="/" style={S.primary}>
-                  Create a secure link →
-                </Link>
-                <Link href="/pricing" style={S.secondary}>
-                  View pricing
-                </Link>
+                <TrackingCtas variant="hero" />
               </div>
 
               <div style={S.micro}>
@@ -344,8 +317,15 @@ export default function Page() {
             <div style={S.qa}>
               <p style={S.q}>Where are Terms and Privacy?</p>
               <p style={S.a}>
-                Here: <Link href="/terms" style={{ color: '#D9D3FF', textDecoration: 'underline' }}>Terms</Link> and{' '}
-                <Link href="/privacy" style={{ color: '#D9D3FF', textDecoration: 'underline' }}>Privacy</Link>.
+                Here:{' '}
+                <Link href="/terms" style={{ color: '#D9D3FF', textDecoration: 'underline' }}>
+                  Terms
+                </Link>{' '}
+                and{' '}
+                <Link href="/privacy" style={{ color: '#D9D3FF', textDecoration: 'underline' }}>
+                  Privacy
+                </Link>
+                .
               </p>
             </div>
           </div>
@@ -357,17 +337,23 @@ export default function Page() {
             <p style={S.bottomTitle}>Ready to send a secure link?</p>
             <p style={S.bottomText}>Upload a file and generate a time-limited download link in seconds.</p>
           </div>
-          <Link href="/" style={S.primary}>
-            Create a link →
-          </Link>
+
+          {/* ✅ Tracked CTA (Bottom) */}
+          <TrackingCtas variant="bottom" />
         </section>
 
         <footer style={S.footer}>
           <div>© {new Date().getFullYear()} FilePay</div>
           <div style={S.footLinks}>
-            <Link href="/pricing" style={S.footLink}>Pricing</Link>
-            <Link href="/terms" style={S.footLink}>Terms</Link>
-            <Link href="/privacy" style={S.footLink}>Privacy</Link>
+            <Link href="/pricing" style={S.footLink}>
+              Pricing
+            </Link>
+            <Link href="/terms" style={S.footLink}>
+              Terms
+            </Link>
+            <Link href="/privacy" style={S.footLink}>
+              Privacy
+            </Link>
           </div>
         </footer>
       </div>
