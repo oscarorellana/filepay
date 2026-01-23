@@ -55,6 +55,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             gtag('config', 'G-XXXXXXXXXX');
           `}
         </Script>
+         <Analytics />
       </body>
     </html>
   )
