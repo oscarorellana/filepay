@@ -1,9 +1,9 @@
 'use client'
 
-
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, DragEvent } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import { track } from '@vercel/analytics'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -141,7 +141,7 @@ const PRICE_BY_DAYS: Record<number, number> = {
           if (proCancelAtPeriodEnd) return endShort ? `PRO · Ends ${endShort}` : 'PRO · Ending'
           return endShort ? `PRO · Renews ${endShort}` : 'PRO · Active'
         }
-        return 'FREE'
+       return 'PAY PER LINK'
       }, [isPro, proCancelAtPeriodEnd, proEndsAt])
 
     useEffect(() => {
@@ -375,47 +375,78 @@ const PRICE_BY_DAYS: Record<number, number> = {
         window.location.href = json.url
       }
 
-      async function handleCreateLink() {
+async function handleCreateLink() {
   setStatus('')
 
   if (!file) {
     setStatus('Please select a file first.')
+    track('generate_link_blocked', { reason: 'no_file' })
     return
   }
 
-  // 🔒 Seguridad: tamaño máximo
   const maxBytes = userId ? MAX_BYTES_LOGGED : MAX_BYTES_ANON
+
   if (file.size > maxBytes) {
     setStatus(`File too large. Max size is ${prettyBytes(maxBytes)}.`)
+    track('generate_link_blocked', {
+      reason: 'too_large',
+      max_mb: String(Math.round(maxBytes / 1024 / 1024)),
+      size_mb: String(Math.round(file.size / 1024 / 1024)),
+      ext: getExt(file.name) || 'unknown',
+      is_signed_in: userId ? '1' : '0',
+    })
     return
   }
 
-  // 🔒 Seguridad: tipos bloqueados (ISO, exe, etc.)
   if (isBlockedFile(file)) {
     setStatus('This file type is not allowed for safety reasons.')
+    track('generate_link_blocked', {
+      reason: 'blocked_ext',
+      ext: getExt(file.name) || 'unknown',
+      is_signed_in: userId ? '1' : '0',
+    })
     return
   }
 
-  // 🔒 Aceptación de términos
   if (!accepted) {
     setStatus('You must accept the Terms of Service to continue.')
+    track('generate_link_blocked', { reason: 'not_accepted' })
     return
   }
+
+  track('generate_link_clicked', {
+    is_pro: isPro ? '1' : '0',
+    days: String(days),
+    size_mb: String(Math.round(file.size / 1024 / 1024)),
+    ext: getExt(file.name) || 'unknown',
+    is_signed_in: userId ? '1' : '0',
+  })
 
   setBusy(true)
 
   try {
     setStatus('Uploading…')
     const path = await uploadToSupabase(file)
+    track('upload_success', { is_pro: isPro ? '1' : '0' })
 
     setStatus('Creating link…')
     const meta = await createLink(path, file.size)
-    const code = meta.code
+    track('create_link_success', { is_pro: isPro ? '1' : '0', days: String(days) })
 
     setStatus(isPro ? 'Finalizing…' : 'Redirecting to payment…')
-    await goPayOrProBypass(code)
+    track('checkout_redirect', { is_pro: isPro ? '1' : '0', days: String(days) })
+
+    await goPayOrProBypass(meta.code)
   } catch (e: any) {
-    setStatus(e?.message ?? 'Something went wrong.')
+    const msg = e?.message ?? 'Something went wrong.'
+    setStatus(msg)
+
+    track('generate_link_failed', {
+      error: msg.slice(0, 120),
+      // “mejor esfuerzo” para saber en qué parte explotó
+      step: status.includes('Uploading') ? 'upload' : status.includes('Creating') ? 'create_link' : 'unknown',
+    })
+
     setBusy(false)
   }
 }
@@ -570,7 +601,18 @@ const PRICE_BY_DAYS: Record<number, number> = {
                     ref={fileInputRef}
                     type="file"
                     style={{ display: 'none' }}
-                    onChange={(e) => setPickedFile(e.target.files?.[0] ?? null)}
+                  onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null
+                  setPickedFile(f)
+
+                  if (f) {
+                  track('file_selected', {
+                  name: f.name,
+                  size_mb: Math.round(f.size / 1024 / 1024),
+                  type: f.type || 'unknown',
+                  })
+                  }
+        }}
                     disabled={busy}
                   />
 
@@ -666,7 +708,11 @@ const PRICE_BY_DAYS: Record<number, number> = {
   <input
     type="checkbox"
     checked={accepted}
-    onChange={(e) => setAccepted(e.target.checked)}
+    onChange={(e) => {
+  const v = e.target.checked
+  setAccepted(v)
+  track('tos_accept_toggle', { accepted: v ? '1' : '0' })
+}}
     style={{ marginTop: 3 }}
   />
 
