@@ -3,17 +3,25 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'WeTransfer Alternative for Secure File Sharing | FilePay',
+  title: 'WeTransfer Alternative for Paid File Sharing | FilePay',
   description:
-    'Create secure, time-limited download links for large files. Paid-only to reduce abuse. Simple, fast, professional.',
-  alternates: { canonical: '/wetransfer-alternative' },
-  robots: { index: true, follow: true },
+    'A secure WeTransfer alternative to send large files and get paid. Links expire automatically. No free trials.',
+  alternates: {
+    canonical: '/wetransfer-alternative',
+  },
   openGraph: {
-    title: 'WeTransfer Alternative for Secure File Sharing | FilePay',
+    title: 'WeTransfer Alternative for Paid File Sharing | FilePay',
     description:
-      'Create secure, time-limited download links for large files. Paid-only to reduce abuse. Simple, fast, professional.',
+      'A secure WeTransfer alternative to send large files and get paid. Links expire automatically. No free trials.',
     url: '/wetransfer-alternative',
+    siteName: 'FilePay',
     type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'WeTransfer Alternative for Paid File Sharing | FilePay',
+    description:
+      'A secure WeTransfer alternative to send large files and get paid. Links expire automatically. No free trials.',
   },
 }
 
