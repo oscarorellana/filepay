@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
+import { Resend } from 'resend'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,15 +19,51 @@ function getSupabaseAdmin() {
   return createClient(url, key, { auth: { persistSession: false } })
 }
 
+function getResend() {
+  const key = (process.env.RESEND_API_KEY ?? '').trim()
+  if (!key) throw new Error('Missing RESEND_API_KEY env var')
+  return new Resend(key)
+}
+
+function getAdminEmail() {
+  const to = (process.env.ADMIN_REPORT_EMAIL ?? '').trim()
+  if (!to) throw new Error('Missing ADMIN_REPORT_EMAIL env var')
+  return to
+}
+
+function getEmailFrom() {
+  // Si tienes un dominio luego, cambia a payments@filepay.com
+  return (process.env.EMAIL_FROM ?? 'FilePay <payments@filepay.vercel.app>').trim()
+}
+
 function unixToIso(sec: unknown): string | null {
-  if (typeof sec === 'number' && Number.isFinite(sec) && sec > 0) {
-    return new Date(sec * 1000).toISOString()
-  }
+  if (typeof sec === 'number' && Number.isFinite(sec) && sec > 0) return new Date(sec * 1000).toISOString()
   if (typeof sec === 'string') {
     const n = Number(sec)
     if (Number.isFinite(n) && n > 0) return new Date(n * 1000).toISOString()
   }
   return null
+}
+
+async function safeSendPaymentEmail(args: {
+  subject: string
+  html: string
+}) {
+  // Best-effort: NO rompas el pago si Resend falla.
+  try {
+    const resend = getResend()
+    const to = getAdminEmail()
+    const from = getEmailFrom()
+
+    await resend.emails.send({
+      from,
+      to: [to],
+      subject: args.subject,
+      html: args.html,
+    })
+  } catch (e) {
+    console.error('Payment email failed:', e)
+  }
 }
 
 /**
@@ -46,22 +83,52 @@ export async function POST(req: Request) {
 
     const nowIso = new Date().toISOString()
 
-    // 1) ✅ Pro-bypass (internal)
+    // ------------------------------------------------------------------
+    // 1) ✅ Pro-bypass (internal): session_id = pro_<CODE>
+    // ------------------------------------------------------------------
     if (sessionId.startsWith('pro_')) {
       const code = sessionId.replace(/^pro_/, '').trim()
       if (!code) return NextResponse.json({ error: 'Missing code' }, { status: 400 })
 
-      const { error } = await supabaseAdmin
+      // Idempotente + evita múltiples correos:
+      // - actualiza paid=true
+      // - guarda paid_session_id si está null o es este mismo
+      // - SOLO enviamos correo si esta update afectó filas
+      const { data, error } = await supabaseAdmin
         .from('file_links')
-        .update({ paid: true, paid_at: nowIso })
+        .update({
+          paid: true,
+          paid_at: nowIso,
+          paid_session_id: sessionId,
+          paid_notified_at: nowIso, // marca notificado
+        })
         .eq('code', code)
+        .or(`paid_session_id.is.null,paid_session_id.eq.${sessionId}`)
+        .select('code')
+        .limit(1)
 
       if (error) throw new Error(error.message)
 
-      return NextResponse.json({ ok: true, paid: true, code }, { status: 200 })
+      const updated = Array.isArray(data) && data.length > 0
+      if (updated) {
+        await safeSendPaymentEmail({
+          subject: '💰 FilePay: Pro bypass finalized',
+          html: `
+            <h2>Payment finalized</h2>
+            <p><b>Type:</b> Pro bypass (internal)</p>
+            <p><b>Code:</b> ${code}</p>
+            <p><b>Session:</b> ${sessionId}</p>
+            <p><b>Date:</b> ${nowIso}</p>
+          `,
+        })
+      }
+
+      return NextResponse.json({ ok: true, paid: true, code, pro: true }, { status: 200 })
     }
 
+    // ------------------------------------------------------------------
     // 2) Retrieve Checkout Session
+    // ------------------------------------------------------------------
     const session = await stripe.checkout.sessions.retrieve(sessionId)
 
     // ✅ Stronger detection for subscription checkouts
@@ -70,10 +137,11 @@ export async function POST(req: Request) {
       typeof (session as any).metadata?.user_id === 'string' &&
       (session as any).metadata.user_id.trim().length > 0
 
-    const isSubscription =
-      (session as any).mode === 'subscription' || hasSubId || hasUserId
+    const isSubscription = (session as any).mode === 'subscription' || hasSubId || hasUserId
 
+    // ------------------------------------------------------------------
     // 2a) ✅ Subscription => activate Pro
+    // ------------------------------------------------------------------
     if (isSubscription) {
       const userId = ((session as any).metadata?.user_id ?? '').trim()
       if (!userId) {
@@ -101,6 +169,17 @@ export async function POST(req: Request) {
         }
       }
 
+      // Upsert Pro + idempotencia de notificación:
+      // - enviamos email SOLO si pro_notified_at era null (primera vez) o si quieres cuando renueva.
+      // Para eso: primero leemos pro_notified_at.
+      const { data: existing } = await supabaseAdmin
+        .from('subscriptions')
+        .select('pro_notified_at')
+        .eq('user_id', userId)
+        .maybeSingle()
+
+      const alreadyNotified = Boolean((existing as any)?.pro_notified_at)
+
       const { error } = await supabaseAdmin
         .from('subscriptions')
         .upsert(
@@ -113,11 +192,28 @@ export async function POST(req: Request) {
             current_period_end: currentPeriodEndIso,
             cancel_at_period_end: cancelAtPeriodEnd,
             updated_at: nowIso,
+            // solo setea pro_notified_at si NO existía (si ya existía, lo dejamos)
+            ...(alreadyNotified ? {} : { pro_notified_at: nowIso }),
           },
           { onConflict: 'user_id' }
         )
 
       if (error) throw new Error(error.message)
+
+      if (!alreadyNotified) {
+        await safeSendPaymentEmail({
+          subject: '💰 FilePay: Pro subscription activated',
+          html: `
+            <h2>Pro activated ✅</h2>
+            <p><b>User ID:</b> ${userId}</p>
+            <p><b>Stripe sub:</b> ${subId ?? '—'}</p>
+            <p><b>Stripe customer:</b> ${custId ?? '—'}</p>
+            <p><b>Renews:</b> ${currentPeriodEndIso ?? '—'}</p>
+            <p><b>Cancel at period end:</b> ${cancelAtPeriodEnd ? 'Yes' : 'No'}</p>
+            <p><b>Date:</b> ${nowIso}</p>
+          `,
+        })
+      }
 
       return NextResponse.json(
         {
@@ -131,8 +227,10 @@ export async function POST(req: Request) {
         { status: 200 }
       )
     }
-// 2b) ✅ One-time payment => mark file link as paid (IDEMPOTENT)
-    // Try session metadata first
+
+    // ------------------------------------------------------------------
+    // 2b) ✅ One-time payment => mark file link as paid (IDEMPOTENT)
+    // ------------------------------------------------------------------
     let code = ((session as any)?.metadata?.code ?? '').trim()
 
     // Fallback: PaymentIntent metadata
@@ -145,21 +243,36 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing code in session metadata' }, { status: 400 })
     }
 
-    // ✅ Idempotent finalize:
-    // - store paid_session_id so this session cannot re-send email
-    // - allow retries with SAME session_id safely
-const { error: upErr } = await supabaseAdmin
-  .from('file_links')
-  .update({
-    paid: true,
-    paid_at: nowIso,
-    paid_session_id: sessionId,
-  })
-  .eq('code', code)
-  .or(`paid_session_id.is.null,paid_session_id.eq.${sessionId}`)
+    // Idempotente y evita re-email:
+    // - Solo actualiza si paid_session_id es null o ya es este sessionId
+    // - Solo seteamos paid_notified_at si era null (primera vez)
+    const { data, error: upErr } = await supabaseAdmin
+      .from('file_links')
+      .update({
+        paid: true,
+        paid_at: nowIso,
+        paid_session_id: sessionId,
+        paid_notified_at: nowIso,
+      })
+      .eq('code', code)
+      .or(`paid_session_id.is.null,paid_session_id.eq.${sessionId}`)
+      .select('code, paid_notified_at')
+      .limit(1)
 
-if (upErr) throw new Error(upErr.message)
+    if (upErr) throw new Error(upErr.message)
 
+    const updated = Array.isArray(data) && data.length > 0
+    if (updated) {
+      await safeSendPaymentEmail({
+        subject: '💰 FilePay: New one-time link payment',
+        html: `
+          <h2>One-time link payment ✅</h2>
+          <p><b>Code:</b> ${code}</p>
+          <p><b>Session:</b> ${sessionId}</p>
+          <p><b>Date:</b> ${nowIso}</p>
+        `,
+      })
+    }
 
     return NextResponse.json({ ok: true, paid: true, code }, { status: 200 })
   } catch (err: any) {
