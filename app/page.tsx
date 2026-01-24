@@ -814,7 +814,23 @@ async function handleCreateLink() {
                 )}
               </aside>
             </div>
+<section style={{ marginTop: 32 }}>
+  <h3 style={{ fontWeight: 950, marginBottom: 12 }}>Learn more</h3>
 
+  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+    <a href="/wetransfer-alternative" style={styles.linkBtn}>
+      WeTransfer alternative
+    </a>
+
+    <a href="/paid-file-sharing" style={styles.linkBtn}>
+      Paid file sharing
+    </a>
+
+    <a href="/expiring-download-links" style={styles.linkBtn}>
+      Expiring download links
+    </a>
+  </div>
+</section>
      <footer
   style={{
     ...styles.footer,
