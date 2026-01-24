@@ -3,23 +3,23 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Expiring Download Links for Secure File Sharing | FilePay',
+  title: 'Expiring Download Links (Time-Limited) | FilePay',
   description:
-    'Create expiring download links to share files securely. Links stop working automatically after a set time.',
+    'Create expiring download links to share files securely. Links stop working automatically after 1–30 days.',
   alternates: { canonical: '/expiring-download-links' },
   openGraph: {
-    title: 'Expiring Download Links for Secure File Sharing | FilePay',
+    title: 'Expiring Download Links (Time-Limited) | FilePay',
     description:
-      'Create expiring download links to share files securely. Links stop working automatically after a set time.',
+      'Time-limited download links for secure file sharing. Automatically expires after 1–30 days.',
     url: '/expiring-download-links',
     siteName: 'FilePay',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Expiring Download Links for Secure File Sharing | FilePay',
+    title: 'Expiring Download Links (Time-Limited) | FilePay',
     description:
-      'Create expiring download links to share files securely. Links stop working automatically after a set time.',
+      'Time-limited download links for secure file sharing. Automatically expires after 1–30 days.',
   },
 }
 
@@ -36,7 +36,13 @@ const S: Record<string, React.CSSProperties> = {
   },
   wrap: { maxWidth: 1120, margin: '0 auto', padding: '32px 18px 72px' },
 
-  nav: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' },
+  nav: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
   brand: {
     display: 'inline-flex',
     gap: 10,
@@ -46,7 +52,13 @@ const S: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     letterSpacing: -0.2,
   },
-  dot: { width: 10, height: 10, borderRadius: 999, background: '#7C5CFF', boxShadow: '0 0 0 3px rgba(124,92,255,0.18)' },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    background: '#7C5CFF',
+    boxShadow: '0 0 0 3px rgba(124,92,255,0.18)',
+  },
   navLinks: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' },
   navLink: {
     color: '#C9D0E1',
@@ -66,10 +78,12 @@ const S: Record<string, React.CSSProperties> = {
     background:
       'radial-gradient(900px 500px at 20% 0%, rgba(124,92,255,0.24), transparent 60%), radial-gradient(800px 420px at 90% 10%, rgba(59,130,246,0.18), transparent 55%), rgba(255,255,255,0.03)',
     padding: 22,
+    overflow: 'hidden',
   },
   heroGrid: { display: 'grid', gridTemplateColumns: '1.15fr 0.85fr', gap: 14, alignItems: 'stretch' },
+
   h1: { margin: 0, fontSize: 42, lineHeight: 1.08, letterSpacing: -0.8 },
-  sub: { marginTop: 12, marginBottom: 0, color: '#C9D0E1', fontSize: 16, lineHeight: 1.65, maxWidth: 660 },
+  sub: { marginTop: 12, marginBottom: 0, color: '#C9D0E1', fontSize: 16, lineHeight: 1.65, maxWidth: 760 },
 
   pills: { marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' },
   pill: {
@@ -109,47 +123,40 @@ const S: Record<string, React.CSSProperties> = {
     textDecoration: 'none',
   },
 
-  sideCard: {
+  row: { marginTop: 18, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 },
+  card: {
     borderRadius: 18,
     border: '1px solid rgba(255,255,255,0.10)',
-    background: 'rgba(0,0,0,0.18)',
+    background: 'rgba(255,255,255,0.03)',
     padding: 16,
-    height: '100%',
   },
-  sideTitle: { margin: 0, fontWeight: 950, fontSize: 14, letterSpacing: -0.1 },
-  bullets: { margin: '10px 0 0', paddingLeft: 18, color: '#C9D0E1', lineHeight: 1.75, fontSize: 13 },
-
-  row: { marginTop: 18, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 },
-  card: { borderRadius: 18, border: '1px solid rgba(255,255,255,0.10)', background: 'rgba(255,255,255,0.03)', padding: 16 },
   cardTitle: { margin: 0, fontWeight: 950, fontSize: 14, letterSpacing: -0.1 },
   cardText: { margin: '8px 0 0', color: '#C9D0E1', lineHeight: 1.6, fontSize: 13 },
 
   section: { marginTop: 28 },
   h2: { margin: '0 0 10px', fontSize: 20, letterSpacing: -0.3 },
-  how: { display: 'grid', gap: 10 },
-  step: {
-    display: 'flex',
-    gap: 12,
-    alignItems: 'flex-start',
-    borderRadius: 16,
+  h3: { margin: '18px 0 8px', fontSize: 14, fontWeight: 950, letterSpacing: -0.1 },
+  text: { margin: 0, color: '#C9D0E1', lineHeight: 1.75, fontSize: 14, maxWidth: 920 },
+
+  grid2: { marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
+  bigCard: {
+    borderRadius: 18,
     border: '1px solid rgba(255,255,255,0.10)',
     background: 'rgba(255,255,255,0.03)',
-    padding: 14,
+    padding: 16,
   },
-  stepNum: {
-    width: 28,
-    height: 28,
-    borderRadius: 10,
-    background: 'rgba(124,92,255,0.18)',
-    border: '1px solid rgba(124,92,255,0.35)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontWeight: 950,
-    color: '#D9D3FF',
-    flex: '0 0 auto',
+  list: { margin: '10px 0 0', paddingLeft: 18, color: '#C9D0E1', lineHeight: 1.75, fontSize: 13 },
+
+  faq: {
+    marginTop: 10,
+    borderRadius: 18,
+    border: '1px solid rgba(255,255,255,0.10)',
+    background: 'rgba(255,255,255,0.03)',
+    overflow: 'hidden',
   },
-  stepText: { margin: 0, color: '#C9D0E1', lineHeight: 1.6, fontSize: 14 },
+  qa: { padding: 14, borderTop: '1px solid rgba(255,255,255,0.08)' },
+  q: { margin: 0, fontWeight: 950, letterSpacing: -0.1 },
+  a: { margin: '8px 0 0', color: '#C9D0E1', lineHeight: 1.65, fontSize: 14 },
 
   bottomCta: {
     marginTop: 26,
@@ -196,15 +203,17 @@ export default function Page() {
         <section style={S.hero}>
           <div style={S.heroGrid}>
             <div>
-              <h1 style={S.h1}>Expiring download links for secure sharing.</h1>
+              <h1 style={S.h1}>Expiring download links (time-limited access).</h1>
               <p style={S.sub}>
-                Choose how long your link stays active. When it expires, access stops automatically — fewer leaks, cleaner security.
+                Create links that stop working automatically after <b>1–30 days</b>.
+                Great for privacy, client deliveries, and reducing risk from leaked links.
               </p>
 
               <div style={S.pills}>
                 <span style={S.pill}>⏳ Auto-expiring links</span>
-                <span style={S.pill}>🔒 Better privacy</span>
-                <span style={S.pill}>🧹 Cleanup-ready</span>
+                <span style={S.pill}>🔒 Less long-term exposure</span>
+                <span style={S.pill}>✅ Recipient needs no account</span>
+                <span style={S.pill}>🧼 Cleaner file sharing</span>
               </div>
 
               <div style={S.ctas}>
@@ -212,50 +221,92 @@ export default function Page() {
                 <Link href="/pricing" style={S.secondary}>View pricing</Link>
               </div>
             </div>
-
-            <aside style={S.sideCard}>
-              <p style={S.sideTitle}>Good for</p>
-              <ul style={S.bullets}>
-                <li>Sensitive client files</li>
-                <li>Temporary access for contractors</li>
-                <li>Short-term project handoffs</li>
-                <li>Reducing long-term link leaks</li>
-              </ul>
-            </aside>
           </div>
         </section>
 
         {/* Value props */}
         <section style={S.row}>
           <div style={S.card}>
-            <p style={S.cardTitle}>Stops link leaks</p>
-            <p style={S.cardText}>Old links don’t stay valid forever. After expiry, the link becomes inaccessible.</p>
+            <p style={S.cardTitle}>Stops working automatically</p>
+            <p style={S.cardText}>Once expired, the link becomes inaccessible. No manual follow-up needed.</p>
           </div>
           <div style={S.card}>
-            <p style={S.cardTitle}>Cleaner storage lifecycle</p>
-            <p style={S.cardText}>Expired items become eligible for cleanup, helping control storage growth.</p>
+            <p style={S.cardTitle}>Safer sharing by default</p>
+            <p style={S.cardText}>Expiring links reduce the impact of forwarding or “old link leaks”.</p>
           </div>
           <div style={S.card}>
-            <p style={S.cardTitle}>Paid-only reduces abuse</p>
-            <p style={S.cardText}>Paid-only design helps discourage spam and risky uploads compared to free tools.</p>
+            <p style={S.cardTitle}>Great for handoffs</p>
+            <p style={S.cardText}>Perfect for client deliveries, temporary access, and short-term downloads.</p>
           </div>
         </section>
 
-        {/* How it works */}
+        {/* SEO content */}
         <section style={S.section}>
-          <h2 style={S.h2}>How it works</h2>
-          <div style={S.how}>
-            <div style={S.step}>
-              <div style={S.stepNum}>1</div>
-              <p style={S.stepText}><b>Upload</b> your file.</p>
+          <h2 style={S.h2}>What are expiring download links?</h2>
+          <p style={S.text}>
+            Expiring download links are URLs that provide access to a file for a limited time window.
+            After the expiration date, the link becomes unusable. This approach reduces long-term exposure and makes file sharing safer.
+          </p>
+
+          <h3 style={S.h3}>Why people choose expiring links</h3>
+          <div style={S.grid2}>
+            <div style={S.bigCard}>
+              <p style={S.q}>Privacy and reduced exposure</p>
+              <p style={S.a}>
+                A link that lives forever is a liability. Expiration keeps access limited to when it’s actually needed.
+              </p>
+              <ul style={S.list}>
+                <li>Temporary sharing of documents</li>
+                <li>Short-term access for clients</li>
+                <li>Reducing risk if a link gets forwarded</li>
+              </ul>
             </div>
-            <div style={S.step}>
-              <div style={S.stepNum}>2</div>
-              <p style={S.stepText}><b>Pick expiry</b> (1–30 days).</p>
+
+            <div style={S.bigCard}>
+              <p style={S.q}>Cleaner client deliveries</p>
+              <p style={S.a}>
+                You don’t have to remember to disable old links. FilePay handles expiration automatically.
+              </p>
+              <ul style={S.list}>
+                <li>Design handoffs</li>
+                <li>Video exports</li>
+                <li>Project archives</li>
+              </ul>
             </div>
-            <div style={S.step}>
-              <div style={S.stepNum}>3</div>
-              <p style={S.stepText}><b>Share</b> the link. It expires automatically.</p>
+          </div>
+
+          <p style={{ ...S.text, marginTop: 10 }}>
+            Want paid access too? See{' '}
+            <Link href="/paid-file-sharing" style={{ color: '#D9D3FF', textDecoration: 'underline' }}>
+              paid file sharing
+            </Link>
+            . Looking for mainstream alternatives? See{' '}
+            <Link href="/wetransfer-alternative" style={{ color: '#D9D3FF', textDecoration: 'underline' }}>
+              WeTransfer alternative
+            </Link>
+            .
+          </p>
+        </section>
+
+        {/* FAQ */}
+        <section style={S.section}>
+          <h2 style={S.h2}>FAQ</h2>
+          <div style={S.faq}>
+            <div style={{ ...S.qa, borderTop: 'none' }}>
+              <p style={S.q}>How long can a link last?</p>
+              <p style={S.a}>Currently: 1, 3, 7, 14, or 30 days.</p>
+            </div>
+            <div style={S.qa}>
+              <p style={S.q}>Can I manually disable a link?</p>
+              <p style={S.a}>Expiration is automatic. (Manual revoke can be added later if you want.)</p>
+            </div>
+            <div style={S.qa}>
+              <p style={S.q}>Do recipients need an account?</p>
+              <p style={S.a}>No.</p>
+            </div>
+            <div style={S.qa}>
+              <p style={S.q}>What happens after expiration?</p>
+              <p style={S.a}>The link becomes inaccessible. Expired items are eligible for cleanup.</p>
             </div>
           </div>
         </section>
@@ -263,8 +314,8 @@ export default function Page() {
         {/* Bottom CTA */}
         <section style={S.bottomCta}>
           <div>
-            <p style={S.bottomTitle}>Want a link that doesn’t live forever?</p>
-            <p style={S.bottomText}>Create an expiring link in seconds.</p>
+            <p style={S.bottomTitle}>Ready to share safely?</p>
+            <p style={S.bottomText}>Create an expiring download link in seconds.</p>
           </div>
           <Link href="/" style={S.primary}>Create a link →</Link>
         </section>

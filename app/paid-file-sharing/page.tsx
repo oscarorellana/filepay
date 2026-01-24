@@ -83,7 +83,7 @@ const S: Record<string, React.CSSProperties> = {
   heroGrid: { display: 'grid', gridTemplateColumns: '1.15fr 0.85fr', gap: 14, alignItems: 'stretch' },
 
   h1: { margin: 0, fontSize: 42, lineHeight: 1.08, letterSpacing: -0.8 },
-  sub: { marginTop: 12, marginBottom: 0, color: '#C9D0E1', fontSize: 16, lineHeight: 1.65, maxWidth: 660 },
+  sub: { marginTop: 12, marginBottom: 0, color: '#C9D0E1', fontSize: 16, lineHeight: 1.65, maxWidth: 740 },
 
   pills: { marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' },
   pill: {
@@ -144,30 +144,28 @@ const S: Record<string, React.CSSProperties> = {
 
   section: { marginTop: 28 },
   h2: { margin: '0 0 10px', fontSize: 20, letterSpacing: -0.3 },
-  how: { display: 'grid', gap: 10 },
-  step: {
-    display: 'flex',
-    gap: 12,
-    alignItems: 'flex-start',
-    borderRadius: 16,
+  h3: { margin: '18px 0 8px', fontSize: 14, fontWeight: 950, letterSpacing: -0.1 },
+  text: { margin: 0, color: '#C9D0E1', lineHeight: 1.75, fontSize: 14, maxWidth: 920 },
+
+  grid2: { marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
+  bigCard: {
+    borderRadius: 18,
     border: '1px solid rgba(255,255,255,0.10)',
     background: 'rgba(255,255,255,0.03)',
-    padding: 14,
+    padding: 16,
   },
-  stepNum: {
-    width: 28,
-    height: 28,
-    borderRadius: 10,
-    background: 'rgba(124,92,255,0.18)',
-    border: '1px solid rgba(124,92,255,0.35)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontWeight: 950,
-    color: '#D9D3FF',
-    flex: '0 0 auto',
+  list: { margin: '10px 0 0', paddingLeft: 18, color: '#C9D0E1', lineHeight: 1.75, fontSize: 13 },
+
+  faq: {
+    marginTop: 10,
+    borderRadius: 18,
+    border: '1px solid rgba(255,255,255,0.10)',
+    background: 'rgba(255,255,255,0.03)',
+    overflow: 'hidden',
   },
-  stepText: { margin: 0, color: '#C9D0E1', lineHeight: 1.6, fontSize: 14 },
+  qa: { padding: 14, borderTop: '1px solid rgba(255,255,255,0.08)' },
+  q: { margin: 0, fontWeight: 950, letterSpacing: -0.1 },
+  a: { margin: '8px 0 0', color: '#C9D0E1', lineHeight: 1.65, fontSize: 14 },
 
   bottomCta: {
     marginTop: 26,
@@ -222,7 +220,8 @@ export default function Page() {
               <div style={S.pills}>
                 <span style={S.pill}>✅ Pay once, share link</span>
                 <span style={S.pill}>⏳ Auto-expiring</span>
-                <span style={S.pill}>🧾 Great for client deliveries</span>
+                <span style={S.pill}>🧾 Built for client deliveries</span>
+                <span style={S.pill}>🔒 Safer by design</span>
               </div>
 
               <div style={S.ctas}>
@@ -238,6 +237,7 @@ export default function Page() {
                 <li>Designers delivering final assets</li>
                 <li>Agencies handing off client work</li>
                 <li>Consultants sharing private docs</li>
+                <li>IT / contractors sharing packages (non-executable)</li>
               </ul>
             </aside>
           </div>
@@ -250,7 +250,7 @@ export default function Page() {
             <p style={S.cardText}>Free upload tools attract spam, malware and illegal content. Paid-only keeps things cleaner.</p>
           </div>
           <div style={S.card}>
-            <p style={S.cardTitle}>Time-limited links</p>
+            <p style={S.cardTitle}>Time-limited access</p>
             <p style={S.cardText}>Pick 1–30 days. The link stops working automatically after expiry.</p>
           </div>
           <div style={S.card}>
@@ -259,21 +259,86 @@ export default function Page() {
           </div>
         </section>
 
-        {/* How it works */}
+        {/* SEO content */}
         <section style={S.section}>
-          <h2 style={S.h2}>How it works</h2>
-          <div style={S.how}>
-            <div style={S.step}>
-              <div style={S.stepNum}>1</div>
-              <p style={S.stepText}><b>Upload</b> your file.</p>
+          <h2 style={S.h2}>What is paid file sharing?</h2>
+          <p style={S.text}>
+            Paid file sharing is a workflow where access to a downloadable file is gated behind payment.
+            Instead of sending a file first and chasing invoices later, you create a link your client can pay for, then download.
+            FilePay is designed for professional handoffs: expiring links, less abuse, and a clean flow for deliverables.
+          </p>
+
+          <h3 style={S.h3}>When paid file sharing makes sense</h3>
+          <div style={S.grid2}>
+            <div style={S.bigCard}>
+              <p style={S.q}>Client deliverables</p>
+              <p style={S.a}>
+                Deliver final exports (video, design assets, documents) with payment-first access. No awkward follow-ups.
+              </p>
+              <ul style={S.list}>
+                <li>Final video renders</li>
+                <li>Brand packages</li>
+                <li>Project archives (ZIP)</li>
+              </ul>
             </div>
-            <div style={S.step}>
-              <div style={S.stepNum}>2</div>
-              <p style={S.stepText}><b>Choose expiry</b> (1, 3, 7, 14, 30 days).</p>
+
+            <div style={S.bigCard}>
+              <p style={S.q}>One-off digital sales</p>
+              <p style={S.a}>
+                Sell a single file or bundle without building a full storefront. Link expires automatically.
+              </p>
+              <ul style={S.list}>
+                <li>Templates</li>
+                <li>Exports / deliverables</li>
+                <li>Private docs</li>
+              </ul>
             </div>
-            <div style={S.step}>
-              <div style={S.stepNum}>3</div>
-              <p style={S.stepText}><b>Share</b> the paid link with your client.</p>
+          </div>
+
+          <h3 style={S.h3}>Paid-only helps reduce abuse</h3>
+          <p style={S.text}>
+            A paid-only model cuts down on drive-by misuse that targets free upload platforms. It’s not perfect security,
+            but it raises the bar and helps keep operations stable.
+          </p>
+
+          <p style={{ ...S.text, marginTop: 10 }}>
+            Want the expiration angle? See{' '}
+            <Link href="/expiring-download-links" style={{ color: '#D9D3FF', textDecoration: 'underline' }}>
+              expiring download links
+            </Link>
+            . Looking for a mainstream comparison keyword? See{' '}
+            <Link href="/wetransfer-alternative" style={{ color: '#D9D3FF', textDecoration: 'underline' }}>
+              WeTransfer alternative
+            </Link>
+            .
+          </p>
+        </section>
+
+        {/* FAQ */}
+        <section style={S.section}>
+          <h2 style={S.h2}>FAQ</h2>
+          <div style={S.faq}>
+            <div style={{ ...S.qa, borderTop: 'none' }}>
+              <p style={S.q}>Do recipients need an account?</p>
+              <p style={S.a}>No. Recipients can access the link directly (until it expires).</p>
+            </div>
+            <div style={S.qa}>
+              <p style={S.q}>Is FilePay a free service?</p>
+              <p style={S.a}>
+                No — FilePay is paid-only by design to reduce abuse and keep reliability high.
+              </p>
+            </div>
+            <div style={S.qa}>
+              <p style={S.q}>What happens when the link expires?</p>
+              <p style={S.a}>
+                The link becomes inaccessible after expiry. Expired items are eligible for cleanup in storage and the database.
+              </p>
+            </div>
+            <div style={S.qa}>
+              <p style={S.q}>What file types can I upload?</p>
+              <p style={S.a}>
+                Common docs, images, videos, and zipped projects. Risky executable formats may be blocked for safety.
+              </p>
             </div>
           </div>
         </section>
