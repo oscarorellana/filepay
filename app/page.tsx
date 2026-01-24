@@ -360,6 +360,12 @@ const PRICE_BY_DAYS: Record<number, number> = {
     }
 
       async function goPayOrProBypass(code: string) {
+
+        track('checkout_started', {
+        page: 'home',
+        days: String(days),
+        is_pro: isPro ? '1' : '0',
+})
         if (isPro) {
           window.location.href = `/success?session_id=pro_${code}`
           return
