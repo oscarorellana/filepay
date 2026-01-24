@@ -1,3 +1,4 @@
+// app/api/checkout/route.ts
 import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 
@@ -18,18 +19,26 @@ function priceForDaysCents(days: number) {
   return map[days] ?? 500
 }
 
-function getOrigin(req: Request) {
-  return (
-    req.headers.get('origin') ||
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    'http://localhost:3000'
-  )
-}
-
 function getStripe() {
   const key = (process.env.STRIPE_SECRET_KEY ?? '').trim()
   if (!key) throw new Error('Missing STRIPE_SECRET_KEY env var')
   return new Stripe(key, { apiVersion: '2025-12-15.clover' })
+}
+
+/**
+ * Prefer NEXT_PUBLIC_SITE_URL (set in Vercel) to avoid weird origin issues.
+ * Fallback to request headers for local/dev.
+ */
+function getOrigin(req: Request) {
+  const env = (process.env.NEXT_PUBLIC_SITE_URL ?? '').trim().replace(/\/+$/, '')
+  if (env) return env
+
+  // Fallback: infer from headers (works in many cases)
+  const proto = req.headers.get('x-forwarded-proto') || 'https'
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host')
+  if (host) return `${proto}://${host}`
+
+  return 'http://localhost:3000'
 }
 
 export async function POST(req: Request) {
@@ -51,6 +60,10 @@ export async function POST(req: Request) {
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
+
+      // Helpful for searching in Stripe dashboard
+      client_reference_id: code,
+
       line_items: [
         {
           price_data: {
@@ -79,8 +92,11 @@ export async function POST(req: Request) {
         },
       },
 
+      // ✅ IMPORTANT: this is what SuccessClient expects (cs_*)
       success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/cancel`,
+
+      // ✅ Avoid a /cancel page accidentally passing the wrong ID (pm_/pi_)
+      cancel_url: `${origin}/?canceled=1`,
     })
 
     return NextResponse.json(
@@ -89,6 +105,9 @@ export async function POST(req: Request) {
     )
   } catch (err: any) {
     console.error('checkout error:', err)
-    return NextResponse.json({ error: err?.message ?? 'Stripe error' }, { status: 500 })
+    return NextResponse.json(
+      { error: err?.message ?? 'Stripe error' },
+      { status: 500 }
+    )
   }
 }
