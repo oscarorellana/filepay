@@ -2,6 +2,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { track } from '@vercel/analytics'
 
 type FinalizeResponse = {
   ok?: boolean
@@ -69,6 +70,10 @@ export default function SuccessClient(props: { sessionId?: string; debug?: boole
         throw new Error('Finalization did not return a paid link or a Pro activation.')
       }
 
+      track('payment_finalized', {
+      kind: okPro ? 'pro' : 'one_time',
+      code: j?.code ? '1' : '0',
+      })
       if (okPro) {
         const ends = formatShortDate(j.current_period_end)
         setMsg(ends ? `✅ Pro activated. Renews ${ends}.` : '✅ Pro activated. You can manage billing anytime.')
