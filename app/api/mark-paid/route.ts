@@ -1,3 +1,4 @@
+// app/api/mark-paid/route.ts
 import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
@@ -34,6 +35,10 @@ function unixToIso(sec: unknown): string | null {
   return null
 }
 
+function safeBool(v: unknown): boolean {
+  return v === true
+}
+
 /**
  * POST /api/mark-paid
  * Body: { session_id: string }
@@ -44,38 +49,68 @@ export async function POST(req: Request) {
     const stripe = getStripe()
 
     const body = await req.json().catch(() => ({}))
-    const raw = (body?.session_id as string | undefined) ?? ''
-    const sessionId = raw.trim()
-
+    const sessionId = String(body?.session_id ?? '').trim()
     if (!sessionId) return NextResponse.json({ error: 'Missing session_id' }, { status: 400 })
 
     const nowIso = new Date().toISOString()
 
-    // 1) ✅ Pro-bypass (internal)
+    // 🔒 Guardrail: must be Checkout Session OR internal Pro bypass
+    if (!sessionId.startsWith('cs_') && !sessionId.startsWith('pro_')) {
+      return NextResponse.json(
+        { error: 'Invalid session_id. Expected Checkout Session (cs_) or pro_*' },
+        { status: 400 }
+      )
+    }
+
+    // 1) ✅ Pro-bypass (internal) => mark link paid, (optional) notify once
     if (sessionId.startsWith('pro_')) {
       const code = sessionId.replace(/^pro_/, '').trim()
       if (!code) return NextResponse.json({ error: 'Missing code' }, { status: 400 })
 
-      const { data: row, error: updErr } = await supabaseAdmin
+      const { data: updated, error: updErr } = await supabaseAdmin
         .from('file_links')
-        .update({ paid: true, paid_at: nowIso })
+        .update({
+          paid: true,
+          paid_at: nowIso,
+          paid_session_id: sessionId,
+        })
         .eq('code', code)
-        .select('code, paid, paid_at')
+        .or(`paid_session_id.is.null,paid_session_id.eq.${sessionId}`)
+        .select('code, paid_notified_at')
         .maybeSingle()
 
       if (updErr) throw new Error(updErr.message)
-      return NextResponse.json({ ok: true, paid: true, code: row?.code ?? code }, { status: 200 })
+
+      // Email once (optional)
+      const adminTo = (process.env.ADMIN_REPORT_EMAIL ?? '').trim()
+      if (adminTo && updated && !updated.paid_notified_at) {
+        const resend = getResend()
+        const from = (process.env.EMAIL_FROM ?? 'FilePay <onboarding@resend.dev>').trim()
+
+        await resend.emails.send({
+          from,
+          to: [adminTo],
+          subject: '💰 New payment on FilePay',
+          html: `
+            <h2>New payment received</h2>
+            <p><b>Type:</b> Pro bypass (no checkout)</p>
+            <p><b>Code:</b> ${updated.code}</p>
+            <p><b>Session:</b> ${sessionId}</p>
+            <p><b>Date:</b> ${nowIso}</p>
+          `,
+        })
+
+        await supabaseAdmin
+          .from('file_links')
+          .update({ paid_notified_at: nowIso })
+          .eq('code', updated.code)
+          .eq('paid_session_id', sessionId)
+      }
+
+      return NextResponse.json({ ok: true, paid: true, code: updated?.code ?? code }, { status: 200 })
     }
 
-// 🔒 Guardrail: must be Checkout Session OR internal Pro bypass
-if (!sessionId.startsWith('cs_') && !sessionId.startsWith('pro_')) {
-  return NextResponse.json(
-    { error: 'Invalid session_id. Expected Checkout Session (cs_) or pro_*' },
-    { status: 400 }
-  )
-}
-
-    // 2) Retrieve Checkout Session
+    // 2) Retrieve Checkout Session (Stripe)
     const session = await stripe.checkout.sessions.retrieve(sessionId)
 
     // Detect subscription checkout
@@ -86,9 +121,9 @@ if (!sessionId.startsWith('cs_') && !sessionId.startsWith('pro_')) {
 
     const isSubscription = (session as any).mode === 'subscription' || hasSubId || hasUserId
 
-    // 2a) ✅ Subscription => activate Pro
+    // 2a) ✅ Subscription => activate Pro (and optionally email once using pro_notified_at)
     if (isSubscription) {
-      const userId = ((session as any).metadata?.user_id ?? '').trim()
+      const userId = String((session as any).metadata?.user_id ?? '').trim()
       if (!userId) return NextResponse.json({ error: 'Missing user_id in session metadata' }, { status: 400 })
 
       const subId = typeof (session as any).subscription === 'string' ? (session as any).subscription : null
@@ -99,14 +134,14 @@ if (!sessionId.startsWith('cs_') && !sessionId.startsWith('pro_')) {
 
       if (subId) {
         const subRes = await stripe.subscriptions.retrieve(subId)
-        if ('deleted' in subRes && subRes.deleted) {
+        if ('deleted' in subRes && (subRes as any).deleted) {
           currentPeriodEndIso = null
           cancelAtPeriodEnd = true
         } else {
           const sub = subRes as Stripe.Subscription
           currentPeriodEndIso = unixToIso((sub as any).current_period_end)
           cancelAtPeriodEnd =
-            Boolean((sub as any).cancel_at_period_end) ||
+            safeBool((sub as any).cancel_at_period_end) ||
             (typeof (sub as any).cancel_at === 'number' && (sub as any).cancel_at > 0)
         }
       }
@@ -129,26 +164,62 @@ if (!sessionId.startsWith('cs_') && !sessionId.startsWith('pro_')) {
 
       if (upErr) throw new Error(upErr.message)
 
-      // Optional: email notify for Pro (one-time)
+      // ✅ Optional: email Pro activation ONCE (uses subscriptions.pro_notified_at)
       const adminTo = (process.env.ADMIN_REPORT_EMAIL ?? '').trim()
       if (adminTo) {
-        // pro_notified_at exists? if you want to use it, otherwise skip
-        // leaving Pro email optional for now to avoid breaking if column not present
+        const { data: subRow } = await supabaseAdmin
+          .from('subscriptions')
+          .select('pro_notified_at')
+          .eq('user_id', userId)
+          .maybeSingle()
+
+        if (subRow && !subRow.pro_notified_at) {
+          const resend = getResend()
+          const from = (process.env.EMAIL_FROM ?? 'FilePay <onboarding@resend.dev>').trim()
+
+          await resend.emails.send({
+            from,
+            to: [adminTo],
+            subject: '✨ New Pro subscription on FilePay',
+            html: `
+              <h2>Pro subscription activated</h2>
+              <p><b>User:</b> ${userId}</p>
+              <p><b>Stripe Subscription:</b> ${subId ?? '—'}</p>
+              <p><b>Stripe Customer:</b> ${custId ?? '—'}</p>
+              <p><b>Current period end:</b> ${currentPeriodEndIso ?? '—'}</p>
+              <p><b>Cancel at period end:</b> ${cancelAtPeriodEnd ? 'Yes' : 'No'}</p>
+              <p><b>Checkout Session:</b> ${sessionId}</p>
+              <p><b>Date:</b> ${nowIso}</p>
+            `,
+          })
+
+          await supabaseAdmin
+            .from('subscriptions')
+            .update({ pro_notified_at: nowIso })
+            .eq('user_id', userId)
+        }
       }
 
       return NextResponse.json(
-        { ok: true, pro: true, stripe_subscription_id: subId, stripe_customer_id: custId, current_period_end: currentPeriodEndIso, cancel_at_period_end: cancelAtPeriodEnd },
+        {
+          ok: true,
+          pro: true,
+          stripe_subscription_id: subId,
+          stripe_customer_id: custId,
+          current_period_end: currentPeriodEndIso,
+          cancel_at_period_end: cancelAtPeriodEnd,
+        },
         { status: 200 }
       )
     }
 
-    // 2b) ✅ One-time payment => mark file link as paid (idempotent)
-    let code = ((session as any)?.metadata?.code ?? '').trim()
+    // 2b) ✅ One-time payment => mark file link as paid (idempotent + email once)
+    let code = String((session as any)?.metadata?.code ?? '').trim()
 
     // Fallback: PaymentIntent metadata
     if (!code && typeof (session as any).payment_intent === 'string') {
       const pi = await stripe.paymentIntents.retrieve((session as any).payment_intent)
-      code = (pi.metadata?.code ?? '').trim()
+      code = String(pi.metadata?.code ?? '').trim()
     }
 
     if (!code) return NextResponse.json({ error: 'Missing code in session metadata' }, { status: 400 })
@@ -168,10 +239,11 @@ if (!sessionId.startsWith('cs_') && !sessionId.startsWith('pro_')) {
       .maybeSingle()
 
     if (updErr) throw new Error(updErr.message)
+    if (!updated?.code) return NextResponse.json({ error: 'Link not found' }, { status: 404 })
 
     // ✅ Send email once (only if admin email configured)
     const adminTo = (process.env.ADMIN_REPORT_EMAIL ?? '').trim()
-    if (adminTo && updated && !updated.paid_notified_at) {
+    if (adminTo && !updated.paid_notified_at) {
       const resend = getResend()
       const from = (process.env.EMAIL_FROM ?? 'FilePay <onboarding@resend.dev>').trim()
 
@@ -184,19 +256,20 @@ if (!sessionId.startsWith('cs_') && !sessionId.startsWith('pro_')) {
           <p><b>Type:</b> One-time link</p>
           <p><b>Code:</b> ${updated.code}</p>
           <p><b>Checkout Session:</b> ${sessionId}</p>
-          <p><b>Date:</b> ${new Date().toISOString()}</p>
+          <p><b>Date:</b> ${nowIso}</p>
         `,
       })
 
-      // mark notified
+      // mark notified (also idempotent)
       await supabaseAdmin
         .from('file_links')
         .update({ paid_notified_at: nowIso })
         .eq('code', updated.code)
         .eq('paid_session_id', sessionId)
+        .is('paid_notified_at', null)
     }
 
-    return NextResponse.json({ ok: true, paid: true, code }, { status: 200 })
+    return NextResponse.json({ ok: true, paid: true, code: updated.code }, { status: 200 })
   } catch (err: any) {
     console.error('mark-paid error:', err)
     return NextResponse.json({ error: err?.message ?? 'Server error' }, { status: 500 })
