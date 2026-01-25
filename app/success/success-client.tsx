@@ -111,21 +111,20 @@ export default function SuccessClient(props: { sessionId?: string; debug?: boole
         has_code: j?.code ? '1' : '0',
       })
 
-      // ✅ Google Ads conversion (solo una vez)
-      if (!firedRef.current) {
-        firedRef.current = true
 
-        // ✅ TU send_to real (Conversion ID + Label)
-        const SEND_TO = 'AW-17904652192/Mac0CNauzewbEKCfzdlC'
+// ✅ Google Ads conversion (solo una vez) — SOLO cuando realmente quedó pagado
+if (okPaid && !firedRef.current) {
+  firedRef.current = true
 
-        // Stripe en tu checkout está en USD (currency: 'usd')
-        fireGoogleAdsConversion({
-          sendTo: SEND_TO,
-          value: 1, // por ahora 1; luego lo hacemos dinámico si quieres
-          currency: 'USD',
-          transactionId: sessionId, // idempotente (cs_live_...)
-        })
-      }
+  const SEND_TO = 'AW-17904652192/Mac0CNauzewbEKCfzdlC'
+
+  fireGoogleAdsConversion({
+    sendTo: SEND_TO,
+    value: 1,
+    currency: 'USD',
+    transactionId: sessionId,
+  })
+}
 
       if (okPro) {
         const ends = formatShortDate(j.current_period_end)
