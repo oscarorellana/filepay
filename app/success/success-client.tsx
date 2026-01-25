@@ -1,7 +1,8 @@
 // app/success/success-client.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { track } from '@vercel/analytics'
 
 type FinalizeResponse = {
@@ -16,6 +17,25 @@ type FinalizeResponse = {
   error?: string
 }
 
+// ✅ Helper: dispara conversión de Google Ads si gtag existe
+function fireGoogleAdsConversion(params: {
+  sendTo: string
+  value: number
+  currency: string
+  transactionId: string
+}) {
+  if (typeof window === 'undefined') return
+  const gtag = (window as any).gtag
+  if (typeof gtag !== 'function') return
+
+  gtag('event', 'conversion', {
+    send_to: params.sendTo,
+    value: params.value,
+    currency: params.currency,
+    transaction_id: params.transactionId,
+  })
+}
+
 function formatShortDate(iso: string | null | undefined) {
   if (!iso) return null
   const d = new Date(iso)
@@ -23,14 +43,29 @@ function formatShortDate(iso: string | null | undefined) {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-export default function SuccessClient(props: { sessionId?: string; debug?: boolean }) {
-  const sessionId = useMemo(() => (props.sessionId ?? '').trim(), [props.sessionId])
-  const debug = useMemo(() => Boolean(props.debug), [props.debug])
+export default function SuccessClient(props: { sessionId?: string; debug?: boolean } = {}) {
+  const sp = useSearchParams()
+
+  // ✅ session_id desde URL (principal) o props (fallback)
+  const sessionId = useMemo(() => {
+    const fromUrl = (sp?.get('session_id') ?? '').trim()
+    const fromProps = (props.sessionId ?? '').trim()
+    return fromUrl || fromProps
+  }, [sp, props.sessionId])
+
+  const debug = useMemo(() => {
+    const fromUrl = (sp?.get('debug') ?? '').trim() === '1'
+    const fromProps = Boolean(props.debug)
+    return fromUrl || fromProps
+  }, [sp, props.debug])
 
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [json, setJson] = useState<FinalizeResponse | null>(null)
   const [copied, setCopied] = useState(false)
+
+  // ✅ evita doble conversión si refrescan la página
+  const firedRef = useRef(false)
 
   const isOkPaid = json?.paid === true
   const isOkPro = json?.pro === true
@@ -70,10 +105,28 @@ export default function SuccessClient(props: { sessionId?: string; debug?: boole
         throw new Error('Finalization did not return a paid link or a Pro activation.')
       }
 
+      // ✅ Tu tracking en Vercel
       track('payment_finalized', {
-      kind: okPro ? 'pro' : 'one_time',
-      code: j?.code ? '1' : '0',
+        kind: okPro ? 'pro' : 'one_time',
+        has_code: j?.code ? '1' : '0',
       })
+
+      // ✅ Google Ads conversion (solo una vez)
+      if (!firedRef.current) {
+        firedRef.current = true
+
+        // ✅ TU send_to real (Conversion ID + Label)
+        const SEND_TO = 'AW-17904652192/Mac0CNauzewbEKCfzdlC'
+
+        // Stripe en tu checkout está en USD (currency: 'usd')
+        fireGoogleAdsConversion({
+          sendTo: SEND_TO,
+          value: 1, // por ahora 1; luego lo hacemos dinámico si quieres
+          currency: 'USD',
+          transactionId: sessionId, // idempotente (cs_live_...)
+        })
+      }
+
       if (okPro) {
         const ends = formatShortDate(j.current_period_end)
         setMsg(ends ? `✅ Pro activated. Renews ${ends}.` : '✅ Pro activated. You can manage billing anytime.')
