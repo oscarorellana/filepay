@@ -20,20 +20,6 @@ export const metadata: Metadata = {
   icons: {
     icon: '/favicon.ico',
   },
-
-  openGraph: {
-    title: 'FilePay',
-    description: 'Upload a file and share a secure, paid download link.',
-    url: 'https://filepay.vercel.app',
-    siteName: 'FilePay',
-    type: 'website',
-  },
-
-  twitter: {
-    card: 'summary_large_image',
-    title: 'FilePay',
-    description: 'Upload a file and share a secure, paid download link.',
-  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -42,20 +28,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {children}
 
-        {/* Google Analytics 4 */}
+        {/* Google Ads tag */}
         <Script
-          src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"
+          src="https://www.googletagmanager.com/gtag/js?id=AW-17904652192"
           strategy="afterInteractive"
         />
-        <Script id="ga4" strategy="afterInteractive">
+        <Script id="google-ads" strategy="afterInteractive">
           {`
             window.dataLayer = window.dataLayer || [];
             function gtag(){dataLayer.push(arguments);}
             gtag('js', new Date());
-            gtag('config', 'G-XXXXXXXXXX');
+            gtag('config', 'AW-17904652192');
           `}
         </Script>
-         <Analytics />
+
+        {/* Vercel Analytics */}
+        <Analytics />
       </body>
     </html>
   )
